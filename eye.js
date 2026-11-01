@@ -1,9 +1,19 @@
 'use strict';
 
+const { execFileSync } = require('child_process');
+const { readFileSync } = require('fs');
+
 const RAMP = " .'`^,:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
 const CELL = 2.05;
 const FPS = 30;
-const BG = [5, 4, 4];
+const BG = [0, 0, 0];
+const STAGE_FONT = 9;
+const INTRO_TIME = 7.4;
+const TEAR_SPILL = 2.9;
+const TEAR_END = 14;
+const CREDITS_TIME = 76;
+const CRAWL_AT = 9;
+const CRAWL_WIDTH = 26;
 const TAU = Math.PI * 2;
 
 const BALL = 1.18;
@@ -29,11 +39,13 @@ const DISK_OUT = 16;
 const MERGER_STARS = 14000;
 const GALAXY_FLAT = 0.62;
 const WORLD_W = 512;
-const WORLD_L = 2952;
+const WORLD_L = 4152;
+const ALIEN_W = 512;
+const ALIEN_L = 1024;
 const WORLD_STEP = 2;
 const WAVE_SIZE = 256;
 const ENTRY_TIME = 5;
-const GROUND_TIME = 112;
+const GROUND_TIME = 167;
 const CLIMB_TIME = 8;
 const DISSOLVE = 1.6;
 
@@ -42,6 +54,7 @@ const MOODS = {
   alert: { wide: 1.12, squint: 0, brow: 0.08, pupil: 0.32, red: 0.4, droop: -0.05, lazy: 0.85, pace: 7, blinks: [4, 9] },
   tired: { wide: 0.7, squint: 0.1, brow: -0.02, pupil: 0.5, red: 0.95, droop: 0.2, lazy: 2.4, pace: 1, blinks: [1.2, 3.5] },
   wary: { wide: 0.78, squint: 0.8, brow: -0.06, pupil: 0.36, red: 0.5, droop: 0, lazy: 1, pace: 2.2, blinks: [3, 7] },
+  weeping: { wide: 0.9, squint: 0.24, brow: -0.03, pupil: 0.46, red: 1, droop: 0.08, lazy: 1.5, pace: 2, blinks: [99, 99] },
   dazzled: { wide: 0.92, squint: 0.25, brow: -0.02, pupil: 0.34, red: 0.7, droop: 0, lazy: 1, pace: 3, blinks: [99, 99] },
   locked: { wide: 1.14, squint: 0, brow: 0.1, pupil: 0.64, red: 0.4, droop: 0, lazy: 1, pace: 5, blinks: [99, 99] },
 };
@@ -358,6 +371,8 @@ function createEye() {
     fresh: 0,
     zoom: 1,
     ember: 0,
+    tear: 0,
+    squeezed: false,
     portal: false,
     mood: MOODS.calm,
     nextLook: 1, nextFocus: 3, nextMood: 8, nextBlink: 2.5,
@@ -443,6 +458,19 @@ function updateEye(eye, dt) {
   const pupilGoal = mood.pupil + (noise(t * 0.35, 3.5) - 0.5) * 0.1 + (noise(t * 1.4, 8.5) - 0.5) * 0.03;
   eye.pupil += (pupilGoal - eye.pupil) * (1 - Math.exp(-dt * 2.5));
   eye.fresh *= Math.exp(-dt * 2.2);
+  if (eye.tear > 0) {
+    eye.tear += dt;
+    eye.fresh = Math.max(eye.fresh, 0.9 * smooth(0, 2, eye.tear));
+    if (eye.tear > 2.3 && !eye.squeezed) {
+      eye.squeezed = true;
+      blink(eye, 1);
+      eye.closing = 0.26;
+    }
+    if (eye.tear > TEAR_END) {
+      eye.tear = 0;
+      eye.squeezed = false;
+    }
+  }
 }
 
 function drawHair(scene, eye) {
@@ -896,16 +924,16 @@ const STAGES = {
   merger: [95, 16],
   bang: [111, 24],
   comet: [142, 11],
-  eclipse: [307, 9],
+  eclipse: [365, 9],
 };
 const WARPS = [6, 25.5, 54, 64, 74, 84, 95];
 const SUN_AT = 136;
-const BELT_AT = 174.5;
+const BELT_AT = 171;
 const BELT_TIME = 6;
-const EARTH_AT = 182;
+const EARTH_AT = 185;
 const GROUND_AT = EARTH_AT + ENTRY_TIME;
 const CLIMB_AT = GROUND_AT + GROUND_TIME;
-const JOURNEY_END = 332;
+const JOURNEY_END = 390;
 
 const ORBITS = [
   { at: 37, span: 18, turn: -1.5 },
@@ -926,9 +954,8 @@ const JOURNEY = [
       { orbit: 3.4, size: 0.07, speed: 0.4, phase: 5.3, tint: [120, 108, 98] },
     ],
   },
-  { surface: marsSurface, at: 175, span: 9, size: 0.3, side: 1, lift: 0.14, tilt: 0.44, spin: 0.14, reach: 1 },
-  { surface: venusSurface, at: 314, span: 9, size: 0.38, side: 1, lift: -0.12, tilt: 0.05, spin: 0.05, reach: 1.1, halo: [250, 210, 140], haloWidth: 0.05 },
-  { surface: mercurySurface, at: 319, span: 8.5, size: 0.24, side: -1, lift: 0.1, tilt: 0.03, spin: 0.08, reach: 1 },
+  { surface: venusSurface, at: 372, span: 9, size: 0.38, side: 1, lift: -0.12, tilt: 0.05, spin: 0.05, reach: 1.1, halo: [250, 210, 140], haloWidth: 0.05 },
+  { surface: mercurySurface, at: 377, span: 8.5, size: 0.24, side: -1, lift: 0.1, tilt: 0.03, spin: 0.08, reach: 1 },
 ];
 const EARTH = { surface: earthSurface, night: earthNight, tilt: 0.41, spin: 0.14, reach: 1.1, halo: [110, 180, 255], haloWidth: 0.06 };
 const EARTH_LIMB = { ...EARTH, reach: 1.04, haloWidth: 0.016 };
@@ -1072,7 +1099,9 @@ function buildSpace(cols, rows) {
     mark: new Uint8Array(n),
     clouds: bakeClouds(),
     lens: bakeLensing(),
+    crawl: buildCrawl(cols, rows),
     world: bakeWorld(),
+    landings: LANDINGS.forEach(bakeAlien),
     waves: bakeWaves(),
     skyline: new Int16Array(cols),
     depth: new Float32Array(n),
@@ -1172,7 +1201,7 @@ function starLight(f) {
 
 function flightSpeed(f) {
   if (f < 0) return 0.015;
-  let speed = mix(0.06, 0.24, smooth(134, 138, f)) + 2.2 * gauss(f - 135.5, 1.5) + gauss(f - 326, 4);
+  let speed = mix(0.06, 0.24, smooth(134, 138, f)) + 2.2 * gauss(f - 135.5, 1.5) + gauss(f - 384, 4);
   for (const at of WARPS) speed += 1.8 * gauss(f - at, 1.3);
   return speed;
 }
@@ -2387,6 +2416,7 @@ function drawCosmos(space, view, t, f, dt) {
   drawComet(space, f);
   drawSolar(space, view, f);
   for (let w = JOURNEY.length - 1; w >= 0; w--) drawWorld(space, JOURNEY[w], f);
+  drawLandingBody(space, f);
   drawEarthApproach(space, f);
   drawEarthDeparture(space, f);
   drawMoon(space, f);
@@ -2467,25 +2497,57 @@ function trackX(z) {
 
 function cityAt(x, z) {
   const old = gauss(Math.hypot(x - trackX(640) - 20, z - 640), 150);
-  const metro = 1.05 * gauss(Math.hypot(x - 470, z - 4390), 300);
-  const sprawl = 0.5 * smooth(4190, 4260, z) * smooth(4640, 4570, z) * smooth(0.35, 0.6, noise(x * 0.012 + 7, z * 0.012));
+  const metro = 1.05 * gauss(Math.hypot(x - trackX(5590), z - 5590), 300);
+  const sprawl = 0.5 * smooth(5390, 5460, z) * smooth(5840, 5770, z) * smooth(0.35, 0.6, noise(x * 0.012 + 7, z * 0.012));
   return clamp(Math.max(old, metro, sprawl));
 }
 
 const band = (z, a, b, c, d) => smooth(a, b, z) * smooth(d, c, z);
 const desertAt = (z) => band(z, 1250, 1320, 1870, 1930);
-const chinaAt = (z) => band(z, 2340, 2420, 2930, 2990);
-const japanAt = (z) => band(z, 3600, 3660, 4190, 4250);
-const arcticAt = (z) => smooth(5120, 5220, z);
-const deckAt = (z) => Math.max(band(z, 760, 860, 1180, 1280), band(z, 1840, 1940, 2260, 2360), band(z, 4640, 4740, 5060, 5160));
+const amazonAt = (z) => band(z, 2340, 2420, 3000, 3070);
+const chinaAt = (z) => band(z, 3540, 3620, 4130, 4190);
+const japanAt = (z) => band(z, 4800, 4860, 5390, 5450);
+const volcanoAt = (z) => band(z, 6340, 6420, 6900, 6980);
+const arcticAt = (z) => smooth(7440, 7540, z);
+const deckAt = (z) => Math.max(band(z, 760, 860, 1180, 1280), band(z, 1840, 1940, 2260, 2360), band(z, 2980, 3080, 3460, 3560), band(z, 5840, 5940, 6260, 6360), band(z, 6880, 6980, 7380, 7480));
+const skyCover = (z) => Math.max(deckAt(z), 0.6 * desertAt(z), amazonAt(z));
 const wallX = (z) => trackX(z) + 150 + 42 * Math.sin(z * 0.013) + 18 * Math.sin(z * 0.031);
 const PYRAMIDS = [[205, 1760, 74], [315, 1800, 58], [395, 1830, 36]].map(([off, z, half]) => ({ x: trackX(z) + off, z, half }));
 const SPIRE = { x: trackX(640) + 54, z: 640 };
-const FUJI = { x: trackX(4060) - 420, z: 4060, base: 345, peak: 262 };
+const FUJI = { x: trackX(5260) - 420, z: 5260, base: 345, peak: 262 };
+const VOLCANO = { x: trackX(6740) + 380, z: 6740, base: 300, peak: 270, rim: 190 };
 
 function fujiReach(x, z) {
   const dx = x - FUJI.x;
   return Math.hypot(dx - WORLD_W * WORLD_STEP * Math.round(dx / (WORLD_W * WORLD_STEP)), z - FUJI.z);
+}
+
+const crown = { top: 0, seed: 0, rim: 1 };
+
+function crownAt(x, z, away) {
+  const size = 24;
+  const cellX = Math.floor(x / size);
+  const cellZ = Math.floor(z / size);
+  crown.top = 0;
+  crown.seed = 0;
+  crown.rim = 1;
+  for (let dz = -2; dz <= 2; dz++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      const gx = cellX + dx;
+      const gz = cellZ + dz;
+      const giant = hash(gx + 7.5, gz + 1.5) > 0.91;
+      const radius = giant ? 27 + hash(gx, gz + 8) * 9 : 12 + hash(gx, gz + 3) * 8;
+      const gap = Math.hypot(x - (gx + 0.15 + hash(gx, gz) * 0.7) * size, z - (gz + 0.15 + hash(gz, gx + 2) * 0.7) * size) / radius;
+      if (gap >= 1) continue;
+      const tall = (giant ? 50 : 20 + hash(gx + 3, gz + 5) * 15) * mix(0.4, 1, smooth(30, 90, away));
+      const top = tall * (giant ? 0.74 + 0.26 * Math.pow(1 - gap * gap, 0.4) : 0.52 + 0.48 * Math.sqrt(1 - gap * gap));
+      if (top > crown.top) {
+        crown.top = top;
+        crown.seed = hash(gx + 0.5, gz + 0.5);
+        crown.rim = gap;
+      }
+    }
+  }
 }
 
 function pyramidAt(x, z) {
@@ -2540,13 +2602,15 @@ function bakeWorld() {
     const china = chinaAt(z);
     const arctic = arcticAt(z);
     const deck = deckAt(z);
-    const stream = Math.max(smooth(800, 740, z), desert);
+    const stream = smooth(800, 740, z);
+    const amazon = amazonAt(z);
+    const volcano = volcanoAt(z);
     const wall = wallX(z);
     for (let i = 0; i < WORLD_W; i++) {
       const x = i * WORLD_STEP;
       const at = z + shore[i];
       const away = Math.abs(x - path);
-      const sea = band(at, 2980, 3040, 3580, 3640);
+      const sea = band(at, 4180, 4240, 4780, 4840);
       let h = 6 + 16 * fbm(x * 0.012 + 5, z * 0.012 + 9);
       if (range > 0) {
         const ridge = 1 - Math.abs(2 * fbm(x * 0.0055 + 1, z * 0.0055 + 2) - 1);
@@ -2556,8 +2620,7 @@ function bakeWorld() {
       if (river < 30 && stream > 0) h = mix(h, mix(-3, h, smooth(12, 30, river)), stream);
       if (desert > 0) {
         const dune = Math.abs(Math.sin(x * 0.026 + 6 * fbm(x * 0.006 + 2, z * 0.006 + 8)));
-        h = mix(h, (8 + dune * 13) * mix(0.3, 1, smooth(26, 70, river)), desert);
-        if (river < 16 * smooth(0.3, 0.8, desert)) h = -3;
+        h = mix(h, 8 + dune * 13, desert);
         const stone = pyramidAt(x, z);
         if (stone > 0) h = Math.max(h, 8 + stone * 1.3);
       }
@@ -2577,6 +2640,20 @@ function bakeWorld() {
         const ridge = 1 - Math.abs(2 * fbm(x * 0.0055 + 31, z * 0.0055 + 12) - 1);
         const peaks = (Math.pow(ridge, 1.8) * 120 + 30 * smooth(90, 240, away) + (noise(x * 0.05, z * 0.05) - 0.5) * 26) * smooth(40, 170, away);
         h = mix(h, peaks - 4, arctic);
+      }
+      if (amazon > 0) {
+        h = mix(h, 9 + noise(x * 0.07 + 5, z * 0.07 + 2) * 10, amazon);
+        if (away < 34 * amazon) h = mix(-3, h, smooth(18, 34, away));
+      }
+      if (volcano > 0) {
+        h = mix(h, 10 + 10 * fbm(x * 0.03 + 3, z * 0.03 + 1), volcano);
+        const gap = Math.hypot(x - VOLCANO.x, z - VOLCANO.z);
+        if (gap < VOLCANO.base) {
+          const around = Math.atan2(z - VOLCANO.z, x - VOLCANO.x);
+          const gully = noise(Math.cos(around) * 6 + 2, Math.sin(around) * 6 + 5) - 0.5;
+          const rise = Math.pow(1 - gap / VOLCANO.base, 1.35) * VOLCANO.peak;
+          h += Math.min(rise * (1 + gully * 0.24), VOLCANO.rim) - 50 * smooth(48, 14, gap);
+        }
       }
       const city = cityAt(x, z) * (1 - smooth(0, 0.03, sea)) * (1 - desert) * (1 - deck) * (1 - china) * (1 - arctic) * smooth(FUJI.base - 40, FUJI.base, fromFuji) * mix(1, smooth(30, 46, river), stream);
       h = mix(h, 4, smooth(0.08, 0.35, city));
@@ -2629,10 +2706,9 @@ function bakeWorld() {
       const desert = desertAt(z);
       if (desert > 0) {
         const ripple = 0.9 + 0.2 * noise(x * 0.09, z * 0.3);
-        const bank = smooth(76, 34, Math.abs(x - trackX(z) - 36 * Math.sin(z * 0.01)));
-        r = mix(mix(r, 178 * ripple, desert), 52, bank);
-        g = mix(mix(g, 128 * ripple, desert), 120, bank);
-        b = mix(mix(b, 78 * ripple, desert), 50, bank);
+        r = mix(r, 178 * ripple, desert);
+        g = mix(g, 128 * ripple, desert);
+        b = mix(b, 78 * ripple, desert);
         const stone = pyramidAt(x, z);
         if (stone > 0) {
           const course = 0.95 + 0.07 * (Math.floor(h / 12) % 2);
@@ -2683,6 +2759,62 @@ function bakeWorld() {
         r = mix(r, 252, cap);
         g = mix(g, 252, cap);
         b = mix(b, 250, cap);
+      }
+      const amazon = amazonAt(z);
+      if (amazon > 0.02) {
+        const lane = Math.abs(x - trackX(z));
+        const mud = smooth(9, 4, h) * smooth(44, 26, lane);
+        crownAt(x, z, lane);
+        const leaf = (0.84 + 0.42 * noise(x * 0.42, z * 0.42)) * mix(1.22, 0.58, crown.rim * crown.rim);
+        const pick = crown.seed;
+        let cr = pick < 0.3 ? 42 : pick < 0.6 ? 62 : pick < 0.85 ? 30 : 98;
+        let cg = pick < 0.3 ? 112 : pick < 0.6 ? 138 : pick < 0.85 ? 94 : 150;
+        let cb = pick < 0.3 ? 44 : pick < 0.6 ? 54 : pick < 0.85 ? 48 : 60;
+        if (pick > 0.965) {
+          cr = 246;
+          cg = 202;
+          cb = 58;
+        } else if (pick > 0.94) {
+          cr = 226;
+          cg = 88;
+          cb = 44;
+        }
+        if (crown.top > 0) {
+          r = mix(r, cr * leaf, amazon);
+          g = mix(g, cg * leaf, amazon);
+          b = mix(b, cb * leaf, amazon);
+        } else {
+          r = mix(r, 10, amazon);
+          g = mix(g, 34, amazon);
+          b = mix(b, 18, amazon);
+        }
+        const bump = (noise(x * 0.3 + 2, z * 0.3 + 6) - 0.5) * 5;
+        towers[idx] = amazon * (1 - mud) * Math.max(0, crown.top > 0 ? crown.top + bump : 3);
+        if (amazon > 0.5 && mud < 0.5) kind[idx] = 9;
+        r = mix(r, 112, mud);
+        g = mix(g, 84, mud);
+        b = mix(b, 58, mud);
+      }
+      const volcano = volcanoAt(z);
+      if (volcano > 0) {
+        const grain = 0.35 + 0.7 * fbm(x * 0.05 + 4, z * 0.05 + 9) + 0.5 * noise(x * 0.19, z * 0.19);
+        r = mix(r, 64 * grain, volcano);
+        g = mix(g, 58 * grain, volcano);
+        b = mix(b, 56 * grain, volcano);
+        const gap = Math.hypot(x - VOLCANO.x, z - VOLCANO.z);
+        const around = Math.atan2(z - VOLCANO.z, x - VOLCANO.x);
+        const winding = around + 0.7 * (noise(gap * 0.009 + 2, 3.1) - 0.5);
+        const channel = Math.abs(Math.sin(winding * 3));
+        const width = 0.03 + (0.09 * gap) / VOLCANO.base;
+        const open = smooth(0.38, 0.5, noise(Math.cos(around) * 2 + 5, Math.sin(around) * 2 + 8));
+        const flow = smooth(width, width * 0.3, channel) * open * smooth(VOLCANO.base + 110, VOLCANO.base - 20, gap);
+        const crack = 0.65 * smooth(0.03, 0.01, Math.abs(fbm(x * 0.012 + 60, z * 0.012 + 20) - 0.5));
+        const pool = smooth(40, 22, gap);
+        const lava = Math.max(flow, crack, pool) * volcano;
+        if (lava > 0.1) {
+          kind[idx] = 8;
+          lamps[idx] = lava * 255;
+        }
       }
       const arctic = arcticAt(z);
       if (arctic > 0) {
@@ -2751,9 +2883,9 @@ function bakeWorld() {
         g = 92;
         b = 78;
       }
-      tintR[idx] = r;
-      tintG[idx] = g;
-      tintB[idx] = b;
+      tintR[idx] = clamp(r, 0, 255);
+      tintG[idx] = clamp(g, 0, 255);
+      tintB[idx] = clamp(b, 0, 255);
     }
   }
 
@@ -2868,53 +3000,85 @@ const FLIGHT = [
   [40, 2000, 345, 0.22],
   [43.5, 2290, 345, 0.24],
   [45.5, 2400, 220, 0.26],
-  [47.5, 2490, 100, 0.16],
-  [51, 2650, 66, 0.1],
-  [55, 2840, 62, 0.1],
-  [57, 2930, 40, 0.08],
-  [59, 3010, 13, 0.05],
-  [61, 3090, 4.2, 0.02],
-  [68, 3440, 4.2, 0.02],
-  [70, 3540, 12, -0.06],
-  [72, 3640, 36, -0.14],
-  [76, 3790, 44, -0.24],
-  [79, 3930, 50, -0.2],
-  [81.5, 4080, 46, -0.02],
-  [83, 4170, 40, 0.06],
-  [84.5, 4250, 31, 0.05],
-  [90, 4520, 31, 0.05],
-  [92, 4600, 90, 0.14],
-  [94, 4680, 230, 0.18],
-  [96, 4770, 345, 0.22],
-  [99, 5030, 345, 0.24],
-  [101, 5140, 230, 0.24],
-  [103, 5240, 110, 0.06],
-  [105, 5330, 60, -0.12],
-  [110, 5570, 70, -0.12],
-  [112, 5660, 230, 0.06],
-  [114, 5730, 420, 0.3],
-  [116, 5800, 500, 0.34],
-  [119, 5880, 540, 0.34],
+  [47.5, 2480, 120, 0.14],
+  [50.5, 2580, 72, 0.17],
+  [54, 2680, 64, 0.18],
+  [58, 2790, 70, 0.17],
+  [62, 2900, 64, 0.17],
+  [65, 2985, 86, 0.14],
+  [67, 3055, 150, 0.16],
+  [69, 3130, 290, 0.2],
+  [71, 3220, 345, 0.22],
+  [74.5, 3460, 345, 0.24],
+  [76.5, 3600, 220, 0.26],
+  [78.5, 3690, 100, 0.16],
+  [82, 3850, 66, 0.1],
+  [86, 4040, 62, 0.1],
+  [88, 4130, 40, 0.08],
+  [90, 4210, 13, 0.05],
+  [92, 4290, 4.2, 0.02],
+  [99, 4640, 4.2, 0.02],
+  [101, 4740, 12, -0.06],
+  [103, 4840, 36, -0.14],
+  [107, 4990, 44, -0.24],
+  [110, 5130, 50, -0.2],
+  [112.5, 5280, 46, -0.02],
+  [114, 5370, 40, 0.06],
+  [115.5, 5450, 31, 0.05],
+  [121, 5720, 31, 0.05],
+  [123, 5800, 90, 0.14],
+  [125, 5880, 230, 0.18],
+  [127, 5970, 345, 0.22],
+  [130, 6230, 345, 0.24],
+  [132, 6340, 230, 0.2],
+  [134, 6430, 120, 0.06],
+  [136, 6510, 96, -0.24],
+  [139, 6590, 100, -0.28],
+  [142, 6680, 104, -0.26],
+  [145, 6770, 110, -0.06],
+  [147, 6850, 190, 0.1],
+  [149, 6960, 300, 0.2],
+  [151, 7080, 345, 0.22],
+  [154, 7340, 345, 0.24],
+  [156, 7460, 230, 0.24],
+  [158, 7560, 110, 0.06],
+  [160, 7650, 60, -0.12],
+  [165, 7890, 70, -0.12],
+  [167, 7980, 230, 0.06],
+  [169, 8050, 420, 0.3],
+  [171, 8120, 500, 0.34],
+  [174, 8200, 540, 0.34],
 ];
-const SUN_PATH = [[0, 0.7], [16, 0.6], [30, 0.5], [44, 0.46], [60, 0.44], [79, 0.4], [81.5, 0.16], [83.5, 0], [85.5, -0.2], [90, -0.4], [100, -0.5], [120, -0.5]];
-const SUN_TURN = [[0, 2.4], [24, 2.4], [46, -0.42], [120, -0.42]];
-const BANKS = [[0, 0.08], [7, -0.2], [11, 0.16], [15, -0.1], [21, 0.12], [25, -0.14], [30, 0.12], [34, -0.1], [42, 0.1], [46, -0.14], [50, 0.16], [55, -0.12], [60, 0], [66, 0.08], [71, -0.08], [76, 0.14], [82, -0.12], [88, 0.12], [92, -0.1], [98, 0.08], [103, -0.14], [108, 0.12], [112, 0], [119, 0]];
-const MIST = [[46, 0], [48.5, 1], [56, 1], [58.5, 0]];
-const VISTA = [[63, 0], [66, 1], [80, 1], [83, 0]];
+const SUN_PATH = [[0, 0.7], [16, 0.6], [30, 0.5], [44, 0.46], [91, 0.44], [110, 0.4], [112.5, 0.16], [114.5, 0], [116.5, -0.2], [121, -0.4], [131, -0.5], [175, -0.5]];
+const SUN_TURN = [[0, 2.4], [24, 2.4], [46, -0.42], [175, -0.42]];
+const BANKS = [[0, 0.08], [7, -0.2], [11, 0.16], [15, -0.1], [21, 0.12], [25, -0.14], [30, 0.12], [34, -0.1], [42, 0.1], [46, -0.14], [51, 0.12], [55, -0.1], [59, 0.12], [63, -0.08], [70, 0.06], [77, -0.14], [81, 0.16], [86, -0.12], [91, 0], [97, 0.08], [102, -0.08], [107, 0.14], [113, -0.12], [119, 0.12], [123, -0.1], [129, 0.08], [134, -0.12], [138, 0.12], [143, -0.1], [148, 0.08], [158, -0.14], [163, 0.12], [167, 0], [174, 0]];
+const MIST = [[46, 0], [50, 0.3], [63, 0.3], [66, 0], [77, 0], [79.5, 1], [87, 1], [89.5, 0]];
+const RAIN = [[46, 0], [49, 0.55], [64, 0.55], [67, 0]];
+const FIRE = [[130, 0], [135, 1], [148, 1], [153, 0]];
+const VISTA = [[94, 0], [97, 1], [111, 1], [114, 0]];
 const SKY = [
   [0, 16, 56, 150, 136, 168, 206],
-  [62, 18, 62, 156, 156, 186, 216],
-  [70, 30, 86, 172, 184, 210, 234],
-  [79, 30, 86, 172, 184, 210, 234],
-  [81.5, 24, 68, 142, 238, 200, 150],
-  [83.5, 10, 32, 76, 222, 134, 66],
-  [85.5, 5, 12, 34, 62, 58, 56],
-  [88, 3, 4, 14, 7, 10, 26],
-  [120, 3, 4, 14, 7, 10, 26],
+  [45, 16, 56, 150, 136, 168, 206],
+  [49, 74, 88, 96, 138, 148, 146],
+  [64, 74, 88, 96, 138, 148, 146],
+  [69, 18, 62, 156, 156, 186, 216],
+  [93, 18, 62, 156, 156, 186, 216],
+  [101, 30, 86, 172, 184, 210, 234],
+  [110, 30, 86, 172, 184, 210, 234],
+  [112.5, 24, 68, 142, 238, 200, 150],
+  [114.5, 10, 32, 76, 222, 134, 66],
+  [116.5, 5, 12, 34, 62, 58, 56],
+  [119, 3, 4, 14, 7, 10, 26],
+  [130, 3, 4, 14, 7, 10, 26],
+  [135, 6, 10, 12, 84, 42, 24],
+  [148, 6, 10, 12, 84, 42, 24],
+  [153, 3, 4, 14, 7, 10, 26],
+  [175, 3, 4, 14, 7, 10, 26],
 ];
 const SIGHTS = [
   { from: 25.5, to: 35, x: PYRAMIDS[1].x, z: PYRAMIDS[1].z },
-  { from: 65, to: 80.5, x: FUJI.x, z: FUJI.z },
+  { from: 96, to: 111.5, x: FUJI.x, z: FUJI.z },
+  { from: 133, to: 141.5, x: VOLCANO.x, z: VOLCANO.z },
 ];
 
 function sighted(e, x, z, yaw) {
@@ -2924,7 +3088,7 @@ function sighted(e, x, z, yaw) {
   }
   return yaw;
 }
-const AURORA = [[99, 0], [103, 1], [120, 1]];
+const AURORA = [[154, 0], [158, 1], [175, 1]];
 const NIGHT_LANTERN = [255, 176, 96];
 
 function pagoda(x, z, base) {
@@ -2953,32 +3117,36 @@ function torii(x, z) {
   return { x, z, boxes };
 }
 
-const LANDMARKS = [pagoda(trackX(2790) - 34, 2790, 12), torii(trackX(3590) + 26, 3590)];
+const LANDMARKS = [pagoda(trackX(3990) - 34, 3990, 12), torii(trackX(4790) + 26, 4790)];
 
 function drawDeck(space, cam) {
   const { cols, rows, red, green, blue, mark, depth, clouds: tex } = space;
   const { density } = tex;
   const level = 230;
-  if (cam.alt <= level + 2) return;
+  const gap = cam.alt - level;
+  if (Math.abs(gap) < 2) return;
+  const under = gap < 0;
+  const gloom = mix(1, 0.46, amazonAt(cam.z));
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const dc = c - cam.center;
       const below = r - (cam.horizon + cam.slope * dc + cam.sag * dc * dc);
-      if (below < 0.6) continue;
-      const z = ((cam.alt - level) / below) * cam.stretch;
+      if (under ? below > -0.6 : below < 0.6) continue;
+      const z = (gap / below) * cam.stretch;
       const i = r * cols + c;
       if (z > 1500 || depth[i] < z) continue;
       const px = dc / cam.focal;
       const wx = cam.x + (cam.sin + px * cam.cos) * z;
       const wz = cam.z + (cam.cos - px * cam.sin) * z;
-      const edge = deckAt(wz);
+      const edge = skyCover(wz);
       if (edge <= 0) continue;
       const puff = density[cloudIndex(wx * 0.0017, wz * 0.0017)];
       const fine = density[cloudIndex(wx * 0.0065 + 0.3, wz * 0.0065 + 0.6)];
       const cover = clamp((puff * 0.7 + fine * 0.3 - 1 + edge * 1.3) * 3.4);
       if (cover <= 0) continue;
       const side = density[cloudIndex((wx + 34) * 0.0065 + 0.3, (wz + 12) * 0.0065 + 0.6)];
-      const light = clamp(0.62 + (fine - side) * 1.1 + puff * 0.2, 0.42, 1) * (0.2 + 0.8 * cam.day);
+      const top = clamp(0.62 + (fine - side) * 1.1 + puff * 0.2, 0.42, 1);
+      const light = (under ? 0.5 + (1 - puff) * 0.34 + (fine - side) * 0.5 : top) * (0.2 + 0.8 * cam.day) * gloom;
       const air = 1 - Math.exp(-z / 1500);
       red[i] = mix(red[i], mix(250 * light, cam.low[0], air), cover);
       green[i] = mix(green[i], mix(250 * light, cam.low[1], air), cover);
@@ -2989,9 +3157,142 @@ function drawDeck(space, cam) {
   }
 }
 
-function drawLandmarks(space, cam) {
+function drawRain(space, e, amount) {
+  const { cols, rows, n, red, green, blue, mark } = space;
+  const count = Math.floor((n / 22) * amount);
+  for (let k = 0; k < count; k++) {
+    const phase = (hash(k, 2.1) + e * (1.3 + hash(k, 3.3) * 0.7)) % 1;
+    const fromCol = hash(k, 1.3) * (cols + rows) + phase * rows * 0.5;
+    const fromRow = phase * (rows + 8) - 6;
+    const length = 2 + Math.floor(hash(k, 5.7) * 3);
+    for (let s = 0; s < length; s++) {
+      const col = Math.floor(fromCol - s * 0.5) % cols;
+      const row = Math.floor(fromRow - s);
+      if (row < 0 || row >= rows) continue;
+      const i = row * cols + col;
+      red[i] += 50;
+      green[i] += 56;
+      blue[i] += 66;
+      mark[i] = 47;
+    }
+  }
+}
+
+const STRIKES = [50.5, 53.2, 53.5, 57.4, 60.8];
+
+function drawLightning(space, cam, e) {
+  const { cols, rows, n, red, green, blue, mark, depth } = space;
+  for (const at of STRIKES) {
+    const age = e - at;
+    if (age < 0 || age > 0.4) continue;
+    const flash = Math.exp(-age / 0.1);
+    for (let i = 0; i < n; i++) {
+      const lift = flash * (depth[i] > 900 ? 120 : 40);
+      red[i] += lift;
+      green[i] += lift;
+      blue[i] += lift * 1.15;
+    }
+    let col = cols * (0.15 + 0.7 * hash(at, 1.1));
+    const end = Math.min(rows - 1, Math.round(cam.horizon));
+    for (let r = 0; r < end; r++) {
+      const step = (hash(at, r) - 0.5) * 5;
+      col += step;
+      const i = r * cols + clamp(Math.round(col), 0, cols - 1);
+      if (depth[i] < 120) continue;
+      red[i] += 600 * flash;
+      green[i] += 600 * flash;
+      blue[i] += 680 * flash;
+      mark[i] = step > 1 ? 92 : step < -1 ? 47 : 124;
+    }
+  }
+}
+
+function drawEruption(space, cam, e) {
+  const dx = VOLCANO.x - cam.x;
+  const dz = VOLCANO.z - cam.z;
+  const along = dx * cam.sin + dz * cam.cos;
+  if (along < 30 || along > 1500) return;
+  const { cols, rows, red, green, blue, mark, depth, clouds: tex } = space;
+  const { density } = tex;
+  const across = dx * cam.cos - dz * cam.sin;
+  const wide = cam.focal / along;
+  const tall = cam.stretch / along;
+  const baseCol = cam.center + across * wide;
+  const baseRow = cam.horizon + cam.slope * across * wide + (cam.alt - VOLCANO.rim) * tall;
+
+  const strike = hash(Math.floor(e * 2.5), 5.5) > 0.78 ? 1 : 0;
+  const strikeAt = 120 + 300 * hash(Math.floor(e * 2.5), 7.5);
+  for (let r = Math.min(rows - 1, Math.floor(baseRow)); r >= 0; r--) {
+    const height = (baseRow - r) / tall;
+    const drift = height * 0.26;
+    const half = 30 + height * 0.4;
+    const left = Math.max(0, Math.floor(baseCol + (drift - half * 1.6) * wide));
+    const right = Math.min(cols - 1, Math.ceil(baseCol + (drift + half * 1.6) * wide));
+    for (let c = left; c <= right; c++) {
+      const i = r * cols + c;
+      if (depth[i] < along) continue;
+      const u = (c - baseCol) / wide;
+      const rolling = e * 0.05;
+      const puff = density[cloudIndex(u * 0.0024 + 0.2, height * 0.0024 - rolling)];
+      const curl = density[cloudIndex(u * 0.008 + 0.6, height * 0.008 - rolling * 2)];
+      const beside = density[cloudIndex((u + 16) * 0.008 + 0.6, (height + 10) * 0.008 - rolling * 2)];
+      const shape = Math.abs(u - drift) / half + (0.55 - puff * 0.6 - curl * 0.4) * 0.9;
+      if (shape > 1) continue;
+      const cover = smooth(1, 0.72, shape);
+      const heat = Math.exp(-height / 150);
+      const ember = heat * heat;
+      const relief = clamp(0.72 + (curl - beside) * 2.6, 0.3, 1.5);
+      const smoke = (42 + curl * 84) * relief;
+      const bolt = strike * gauss(height - strikeAt, 34) * gauss(u - drift, 22) * 2;
+      red[i] = mix(red[i], smoke + heat * 230 * relief + ember * 220 + bolt * 210, cover);
+      green[i] = mix(green[i], smoke * 0.94 + heat * 66 * relief + ember * 140 + bolt * 214, cover);
+      blue[i] = mix(blue[i], smoke * 0.92 + ember * 30 + bolt * 214, cover);
+      mark[i] = 0;
+    }
+  }
+
+  const bombs = Math.min(4000, Math.floor(space.n / 7));
+  for (let k = 0; k < bombs; k++) {
+    const life = (hash(k, 1.9) + e * (0.34 + hash(k, 8.3) * 0.2)) % 1;
+    const angle = hash(k, 2.7) * TAU;
+    const spread = hash(k, 3.9) * 120;
+    const rise = 90 + hash(k, 4.3) * 190;
+    const px = Math.cos(angle) * spread * life;
+    const pz = Math.sin(angle) * spread * life;
+    const py = rise * life * 4 * (1 - life);
+    const far = along + pz * cam.cos + px * cam.sin;
+    if (far < 20) continue;
+    const off = across + px * cam.cos - pz * cam.sin;
+    const col = Math.round(cam.center + (off / far) * cam.focal);
+    const row = Math.round(cam.horizon + cam.slope * (off / far) * cam.focal + ((cam.alt - VOLCANO.rim - py) / far) * cam.stretch);
+    if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+    const i = row * cols + col;
+    if (depth[i] < far) continue;
+    const cool = smooth(0.2, 1, life);
+    red[i] += 520;
+    green[i] += mix(300, 76, cool);
+    blue[i] += mix(90, 8, cool);
+    mark[i] = life > 0.5 ? 46 : 42;
+  }
+
+  const ash = Math.floor(space.n / 90);
+  for (let k = 0; k < ash; k++) {
+    const fall = (hash(k, 6.3) + e * (0.16 + hash(k, 2.9) * 0.12)) % 1;
+    const col = Math.floor(hash(k, 3.7) * cols + Math.sin(e + k) * 2 + fall * 14) % cols;
+    const row = Math.floor(fall * rows);
+    if (col < 0) continue;
+    const i = row * cols + col;
+    const glow = 90 + hash(k, 8.8) * 170;
+    red[i] += glow;
+    green[i] += glow * 0.42;
+    blue[i] += glow * 0.08;
+    mark[i] = 46;
+  }
+}
+
+function drawLandmarks(space, cam, items = LANDMARKS) {
   const { cols, rows, red, green, blue, mark, depth } = space;
-  for (const item of LANDMARKS) {
+  for (const item of items) {
     const dx = item.x - cam.x;
     const dz = item.z - cam.z;
     const along = dx * cam.sin + dz * cam.cos;
@@ -3031,11 +3332,11 @@ function catmull(a, b, c, d, t) {
   return b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
 }
 
-function flightAt(e) {
+function flightAt(e, keys = FLIGHT) {
   let k = 1;
-  while (k < FLIGHT.length - 3 && e > FLIGHT[k + 1][0]) k++;
-  const t = clamp((e - FLIGHT[k][0]) / (FLIGHT[k + 1][0] - FLIGHT[k][0]));
-  const value = (slot) => catmull(FLIGHT[k - 1][slot], FLIGHT[k][slot], FLIGHT[k + 1][slot], FLIGHT[k + 2][slot], t);
+  while (k < keys.length - 3 && e > keys[k + 1][0]) k++;
+  const t = clamp((e - keys[k][0]) / (keys[k + 1][0] - keys[k][0]));
+  const value = (slot) => catmull(keys[k - 1][slot], keys[k][slot], keys[k + 1][slot], keys[k + 2][slot], t);
   return { z: value(1), alt: Math.max(value(2), 3.4), tilt: value(3) };
 }
 
@@ -3084,8 +3385,9 @@ function drawGround(space, e) {
   const beamR = 255 * glow;
   const beamG = mix(246, 150, dusk) * glow;
   const beamB = mix(230, 70, dusk) * glow;
-  const skyR = mix(12, 44, day) + 70 * dusk;
-  const skyG = mix(16, 58, day) + 30 * aurora + 48 * dusk;
+  const fire = keyed(FIRE, e);
+  const skyR = mix(12, 44, day) + 70 * dusk + 40 * fire;
+  const skyG = mix(16, 58, day) + 30 * aurora + 48 * dusk + 18 * fire;
   const skyB = mix(36, 84, day) + 44 * aurora + 14 * dusk;
 
   const focal = cols * 0.62;
@@ -3097,7 +3399,7 @@ function drawGround(space, e) {
   const fogRate = ((1 + 2.6 * mist) * (1 - 0.55 * keyed(VISTA, e))) / 1700;
   const far = 680 + alt * 1.6 + 520 * keyed(VISTA, e);
   const start = Math.max(0.6, alt * 0.012);
-  const skim = smooth(60.6, 61.8, e) * smooth(68.2, 67, e);
+  const skim = smooth(91.6, 92.8, e) * smooth(99.2, 98, e);
   const mask = WAVE_SIZE - 1;
   const swellX = -e * 3;
   const swellZ = e * 7;
@@ -3136,6 +3438,11 @@ function drawGround(space, e) {
 
       const water = land <= 0;
       let top = water ? 0 : land + towers[idx];
+      if (z < 110 && kind[idx] === 9 && j + 1 < WORLD_L && i + 1 < WORLD_W) {
+        const a = fi - Math.floor(fi);
+        const b = fj - j;
+        top = land + mix(mix(towers[idx], towers[idx + 1], a), mix(towers[idx + WORLD_W], towers[idx + WORLD_W + 1], a), b);
+      }
       let foam = 0;
       let a0 = 0;
       let a1 = 0;
@@ -3151,7 +3458,7 @@ function drawGround(space, e) {
           const surf = 0.5 + 0.5 * Math.sin(land * 2.6 + e * 2.2);
           foam = Math.max(foam, smooth(0.6, 0.92, surf) * smooth(-4, -1, land));
         }
-        if (wz < 2870 || wz > 3750) {
+        if (wz < 4070 || wz > 4950) {
           top = 0;
           foam = 0;
         }
@@ -3181,7 +3488,7 @@ function drawGround(space, e) {
         const face = type === 3 && top - previous > 1.5;
 
         if (water) {
-          const calm = wz < 2870 || wz > 3750;
+          const calm = wz < 4070 || wz > 4950;
           const ripple = calm ? 0.12 : 1.5 * (1 - 0.88 * aurora);
           const sx = (slopeX[a0] + slopeX[a1]) * ripple;
           const sz = (slopeZ[a0] + slopeZ[a1]) * ripple;
@@ -3197,17 +3504,18 @@ function drawGround(space, e) {
           const rx = vx - 2 * facing * nx;
           const ry = Math.abs(vy - 2 * facing * scale);
           const rz = vz - 2 * facing * nz;
-          const fresnel = (0.03 + 0.97 * Math.pow(1 - clamp(-facing), 5)) * (calm && aurora < 0.5 ? 0.4 : 1);
+          const fresnel = (0.03 + 0.97 * Math.pow(1 - clamp(-facing), 5)) * (calm && aurora < 0.5 ? 0.4 : 1) * (1 - 0.6 * amazonAt(wz));
           const rise = 1 - Math.exp(-ry * 3.2);
           const body = 0.16 + 0.7 * day + 0.3 * dusk;
+          const silt = amazonAt(wz);
           const lean = clamp(nx * sunX + nz * sunZ + scale * sunY + 0.18);
-          lr = mix((10 + 20 * lean) * body, mix(fogR, topR, rise), fresnel);
-          lg = mix((64 + 120 * lean) * body, mix(fogG, topG, rise), fresnel);
-          lb = mix((92 + 120 * lean) * body, mix(fogB, topB, rise), fresnel);
+          lr = mix(mix(10 + 20 * lean, 104, silt) * body, mix(fogR, topR, rise), fresnel);
+          lg = mix(mix(64 + 120 * lean, 78, silt) * body, mix(fogG, topG, rise), fresnel);
+          lb = mix(mix(92 + 120 * lean, 50, silt) * body, mix(fogB, topB, rise), fresnel);
           lr += lean * beamR * 0.5 * dusk;
           lg += lean * beamG * 0.5 * dusk;
           lb += lean * beamB * 0.5 * dusk;
-          const glitter = Math.pow(clamp(rx * sunX + ry * Math.abs(sunY) + rz * sunZ), 60) * smooth(-0.08, 0.02, sunEl);
+          const glitter = Math.pow(clamp(rx * sunX + ry * Math.abs(sunY) + rz * sunZ), 60) * smooth(-0.08, 0.02, sunEl) * (1 - silt);
           lr += glitter * 760;
           lg += glitter * mix(720, 400, dusk);
           lb += glitter * mix(640, 170, dusk);
@@ -3226,7 +3534,7 @@ function drawGround(space, e) {
           shineB = glowCell * dark * 260 * (0.3 + fresnel);
         } else {
           const sun = face ? 0.5 + (seed[idx] / 255) * 0.42 : shade[idx];
-          const near = z < 160 ? (noise(wx * 0.3, wz * 0.3) - 0.5) * 0.3 : 0;
+          const near = z < 160 ? (noise(wx * 0.3, wz * 0.3) - 0.5) * 0.3 + (type === 9 ? (noise(wx * 1.2, wz * 1.2) - 0.5) * 0.9 : 0) : 0;
           const direct = sun * (1.2 - 0.85 * dusk);
           lr = (tintR[idx] / 255) * (skyR + beamR * direct) * (1 + near);
           lg = (tintG[idx] / 255) * (skyG + beamG * direct) * (1 + near);
@@ -3237,6 +3545,19 @@ function drawGround(space, e) {
             shineR = lit * 330 + carpet * 210;
             shineG = lit * 214 + carpet * 118;
             shineB = lit * 116 + carpet * 52;
+            const ground = volcanoAt(wz);
+            if (ground > 0) {
+              shineR += glowCell * ground * 2400;
+              shineG += glowCell * ground * 760;
+              shineB += glowCell * ground * 90;
+            }
+            if (type === 8) {
+              const crust = noise(Math.hypot(wx - VOLCANO.x, wz - VOLCANO.z) * 0.03 - e * 1.3, (wx + wz) * 0.02);
+              const core = lit * (0.42 + 0.8 * smooth(0.28, 0.62, crust));
+              shineR = core * 820;
+              shineG = core * core * 560;
+              shineB = core * core * core * 130;
+            }
             if (type === 4) {
               const lane = Math.floor((wx + wz) / 3) & 1;
               const car = hash(Math.floor(wz / 4 + (lane ? e * 7 : -e * 7)), Math.floor(wx / 12));
@@ -3270,7 +3591,7 @@ function drawGround(space, e) {
             wr *= pane;
             wg *= pane;
             wb *= pane;
-            const neon = wz > 4190 && wz < 4640 && dark > 0.3 && (span & 7) === (seed[idx] & 7);
+            const neon = wz > 5390 && wz < 5840 && dark > 0.3 && (span & 7) === (seed[idx] & 7);
             if (neon) {
               const sign = seed[idx] % 3;
               const pulse = 0.75 + 0.25 * Math.sin(e * 3 + seed[idx]);
@@ -3359,7 +3680,13 @@ function drawGround(space, e) {
   const cam = { x: camX, z: camZ, sin: sinYaw, cos: cosYaw, alt, horizon, slope, sag, focal, stretch, center, day, dark, low: [lowR, lowG, lowB] };
   drawDeck(space, cam);
   drawLandmarks(space, cam);
-  const crossing = deckAt(camZ) * gauss(alt - 230, 42);
+  drawEruption(space, cam, e);
+  const rain = keyed(RAIN, e);
+  if (rain > 0) {
+    drawRain(space, e, rain);
+    drawLightning(space, cam, e);
+  }
+  const crossing = skyCover(camZ) * gauss(alt - 230, 42);
   if (crossing > 0.02) drawVeil(space, crossing, e);
 
   if (skim > 0) {
@@ -3383,7 +3710,7 @@ function drawGround(space, e) {
 
   if (dark > 0.3) {
     for (let k = 0; k < 4; k++) {
-      const age = (e - 104 - k * 2.3) / 0.8;
+      const age = (e - 159 - k * 2.3) / 0.8;
       if (age < 0 || age > 1) continue;
       const fromC = cols * (0.2 + hash(k, 5.5) * 0.6);
       const fromR = rows * (0.05 + hash(k, 6.5) * 0.2);
@@ -3402,6 +3729,381 @@ function drawGround(space, e) {
       }
     }
   }
+}
+
+const MARS_BODY = { surface: marsSurface, tilt: 0.44, spin: 0.08, reach: 1.04, halo: [230, 170, 130], haloWidth: 0.03, ambient: 0.1 };
+
+function alienX(z) {
+  return 512 + 70 * Math.sin(z * 0.0042) + 24 * Math.sin(z * 0.011);
+}
+
+function ledges(v, tall) {
+  const k = v / tall;
+  const floor = Math.floor(k);
+  return (floor + smooth(0.55, 1, k - floor)) * tall;
+}
+
+function mesaAt(x, z) {
+  const size = 170;
+  const cellX = Math.floor(x / size);
+  const cellZ = Math.floor(z / size);
+  let top = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const gx = cellX + dx;
+      const gz = cellZ + dz;
+      if (hash(gx + 0.5, gz + 7.1) < 0.28) continue;
+      const away = Math.hypot(x - (gx + 0.25 + hash(gx, gz) * 0.5) * size, z - (gz + 0.25 + hash(gz, gx + 9) * 0.5) * size);
+      const around = Math.atan2(z - (gz + 0.5) * size, x - (gx + 0.5) * size);
+      const gully = (noise(Math.cos(around) * 7 + gx, Math.sin(around) * 7 + gz) - 0.5) * 22;
+      const radius = 30 + hash(gx + 3, gz) * 38 + (noise(x * 0.03 + gx, z * 0.03 + gz) - 0.5) * 36 + gully;
+      const tall = 64 + hash(gx, gz + 5) * 96;
+      top = Math.max(top, tall * Math.max(smooth(radius + 13, radius - 2, away), 0.3 * smooth(radius + 76, radius + 8, away)));
+    }
+  }
+  return top;
+}
+
+function boulderAt(x, z) {
+  const size = 20;
+  const cellX = Math.floor(x / size);
+  const cellZ = Math.floor(z / size);
+  let top = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const gx = cellX + dx;
+      const gz = cellZ + dz;
+      if (hash(gx + 2.5, gz + 4.5) < 0.62) continue;
+      const radius = 1.4 + Math.pow(hash(gx, gz + 1.5), 3) * 7;
+      const away = Math.hypot(x - (gx + hash(gx, gz)) * size, z - (gz + hash(gz, gx + 2)) * size) / radius;
+      if (away < 1) top = Math.max(top, radius * 0.8 * Math.sqrt(1 - away * away));
+    }
+  }
+  return top;
+}
+
+const ROVER_Z = 560;
+const roverX = (z) => alienX(z) + 24 + 5 * Math.sin(z * 0.02);
+
+function marsDunes(x, z) {
+  return 7 + 8 * Math.abs(Math.sin(x * 0.05 + 6 * fbm(x * 0.01, z * 0.01)));
+}
+
+function marsShape(x, z) {
+  const away = Math.abs(x - alienX(z));
+  const wall = 170 + 45 * Math.sin(z * 0.003 + 1) + 110 * (fbm(x * 0.006 + 2, z * 0.006 + 6) - 0.5);
+  const step = clamp((away - wall) / 190) * 5;
+  const level = Math.floor(step);
+  const rise = (level + smooth(0.45, 1, step - level)) / 5;
+  const top = 190 + 30 * fbm(x * 0.01 + 9, z * 0.01);
+  const dune = marsDunes(x, z);
+  const scree = (noise(x * 0.05, z * 0.05) - 0.5) * 12 * smooth(0, 0.3, rise);
+  const mesa = ledges(mesaAt(x, z) * smooth(44, 104, away), 26);
+  const stone = (noise(x * 0.28, z * 0.28) - 0.5) * 2.4;
+  const rocks = boulderAt(x, z) * smooth(0.3, 0, rise) * smooth(10, 34, Math.abs(x - roverX(z)));
+  return Math.max(mix(dune, top, rise) + scree, dune + mesa) + stone + rocks;
+}
+
+function marsPaint(x, z, h, slope, out) {
+  const course = Math.floor((h + 8 * noise(x * 0.008, z * 0.008)) / 13);
+  const layer = hash(course, 3.1);
+  const streak = 0.84 + 0.3 * noise(x * 0.09, h * 0.4);
+  out[0] = (layer > 0.62 ? 248 : layer > 0.3 ? 176 : 92) * streak;
+  out[1] = (layer > 0.62 ? 196 : layer > 0.3 ? 92 : 46) * streak;
+  out[2] = (layer > 0.62 ? 140 : layer > 0.3 ? 56 : 34) * streak;
+
+  const ground = marsDunes(x, z);
+  const sandy = smooth(0.42, 0.14, slope);
+  const wave = 0.5 + 0.5 * Math.sin(x * 0.72 + z * 0.3 + 4 * noise(x * 0.02, z * 0.02));
+  const shade = 0.82 + 0.3 * noise(x * 0.11 + 3, z * 0.11);
+  const dark = smooth(0.46, 0.3, fbm(x * 0.008 + 12, z * 0.008 + 5)) * smooth(ground + 14, ground + 4, h);
+  rgb[0] = mix(214, 112, dark) * shade * (0.84 + 0.26 * wave);
+  rgb[1] = mix(132, 70, dark) * shade * (0.84 + 0.26 * wave);
+  rgb[2] = mix(82, 50, dark) * shade * (0.84 + 0.26 * wave);
+  tone(out, rgb[0], rgb[1], rgb[2], sandy * 0.92);
+
+  if (h < 60 && boulderAt(x, z) > 0.5) tone(out, 104, 70, 54, 0.82);
+  if (z < ROVER_Z - 4) {
+    const fromTrack = Math.abs(Math.abs(x - roverX(z)) - 7);
+    if (fromTrack < 1.8) tone(out, 134, 86, 58, 0.5 + 0.3 * (Math.floor(z / 3) & 1));
+  }
+}
+
+function bakeAlien(land) {
+  if (land.map) return;
+  const n = ALIEN_W * ALIEN_L;
+  const height = new Float32Array(n);
+  const light = new Float32Array(n);
+  const tintR = new Uint8Array(n);
+  const tintG = new Uint8Array(n);
+  const tintB = new Uint8Array(n);
+  for (let j = 0; j < ALIEN_L; j++) {
+    for (let i = 0; i < ALIEN_W; i++) {
+      height[j * ALIEN_W + i] = land.shape(i * WORLD_STEP, j * WORLD_STEP);
+    }
+  }
+  const at = (i, j) => height[clamp(j, 0, ALIEN_L - 1) * ALIEN_W + ((i + ALIEN_W) % ALIEN_W)];
+  const [sx, sy, sz] = land.lamp;
+  for (let j = 0; j < ALIEN_L; j++) {
+    for (let i = 0; i < ALIEN_W; i++) {
+      const idx = j * ALIEN_W + i;
+      const dx = (at(i + 1, j) - at(i - 1, j)) / (2 * WORLD_STEP);
+      const dz = (at(i, j + 1) - at(i, j - 1)) / (2 * WORLD_STEP);
+      land.paint(i * WORLD_STEP, j * WORLD_STEP, height[idx], Math.hypot(dx, dz), rgb);
+      tintR[idx] = clamp(rgb[0], 0, 255);
+      tintG[idx] = clamp(rgb[1], 0, 255);
+      tintB[idx] = clamp(rgb[2], 0, 255);
+      let sun = clamp((-dx * sx + sy - dz * sz) / Math.sqrt(1 + dx * dx + dz * dz));
+      for (let s = 1; s <= 22; s++) {
+        if (at(i + Math.round(s * sx * 4), j + Math.round(s * sz * 4)) > height[idx] + s * 8 * sy * 0.9) {
+          sun *= 0.3;
+          break;
+        }
+      }
+      light[idx] = sun;
+    }
+  }
+  land.map = { height, light, tintR, tintG, tintB };
+}
+
+function rover() {
+  const x = roverX(ROVER_Z);
+  const base = marsDunes(x, ROVER_Z) + 2;
+  const box = (at, half, low, high, color) => ({ x: at, half, low: base + low, high: base + high, color });
+  const white = [236, 230, 216];
+  const steel = [150, 146, 140];
+  const tyre = [46, 42, 40];
+  return {
+    x,
+    z: ROVER_Z,
+    boxes: [
+      box(-8, 2.4, 0, 4.4, tyre),
+      box(0, 2.4, 0, 4.4, tyre),
+      box(8, 2.4, 0, 4.4, tyre),
+      box(0, 10, 3.4, 5, steel),
+      box(0, 10, 5, 9.6, white),
+      box(-11, 2.6, 7, 13, steel),
+      box(7, 0.8, 9.6, 21, white),
+      box(7, 3, 20, 23.4, white),
+    ],
+  };
+}
+
+const MARS_SITE = [rover()];
+
+function marsSky(space, cam) {
+  const y = ((cam.horizon / space.rows - 0.5) * space.rows * CELL) / space.unit - 0.5;
+  spot(space, -0.7 - cam.yaw, y, 0.035, [120, 104, 92], 1);
+}
+
+function marsDevils(space, cam) {
+  const { cols, rows, n, red, green, blue, mark, depth, clouds: tex } = space;
+  drawLandmarks(space, { ...cam, day: 1, dark: 0 }, MARS_SITE);
+  const motes = Math.floor(n / 70);
+  for (let k = 0; k < motes; k++) {
+    const drift = (hash(k, 1.7) + cam.e * (0.05 + hash(k, 4.4) * 0.09)) % 1;
+    const row = Math.floor((hash(k, 6.6) + 0.04 * Math.sin(cam.e * 0.7 + k)) * rows);
+    const col = Math.floor(drift * cols);
+    if (row < 0 || row >= rows) continue;
+    const i = row * cols + col;
+    red[i] += 46;
+    green[i] += 32;
+    blue[i] += 20;
+    mark[i] = 46;
+  }
+  for (const [z, off] of [[420, 46], [640, -52], [860, 40]]) {
+    const dx = alienX(z) + off - cam.x;
+    const dz = z - cam.z;
+    const along = dx * cam.sin + dz * cam.cos;
+    if (along < 30 || along > 700) continue;
+    const across = dx * cam.cos - dz * cam.sin;
+    const wide = cam.focal / along;
+    const tall = cam.stretch / along;
+    const foot = cam.horizon + cam.slope * across * wide + (cam.alt - 14) * tall;
+    for (let r = Math.min(rows - 1, Math.floor(foot)); r >= 0; r--) {
+      const height = (foot - r) / tall;
+      if (height > 300) break;
+      const half = 5 + height * 0.1;
+      const center = cam.center + (across + 20 * Math.sin(height * 0.012 + cam.e)) * wide;
+      for (let c = Math.max(0, Math.floor(center - half * wide)); c <= Math.min(cols - 1, Math.ceil(center + half * wide)); c++) {
+        const i = r * cols + c;
+        if (depth[i] < along) continue;
+        const u = (c - center) / (half * wide);
+        const swirl = tex.density[cloudIndex(u * 0.3 + cam.e * 0.5, height * 0.004 - cam.e * 0.2)];
+        const cover = smooth(1, 0.3, Math.abs(u)) * (0.45 + 0.55 * swirl) * smooth(300, 180, height);
+        const shade = 0.72 + 0.5 * swirl;
+        red[i] = mix(red[i], 226 * shade, cover);
+        green[i] = mix(green[i], 164 * shade, cover);
+        blue[i] = mix(blue[i], 112 * shade, cover);
+      }
+    }
+  }
+}
+
+const LANDINGS = [
+  {
+    at: 179, time: 26, body: MARS_BODY, shape: marsShape, paint: marsPaint, lamp: [-0.62, 0.36, 0.7], fog: 1 / 1900, decor: marsSky, after: marsDevils,
+    flight: [[-3, -100, 420, 0.36], [0, 0, 400, 0.36], [3, 150, 200, 0.24], [6, 290, 62, -0.04], [9, 430, 34, -0.12], [12, 570, 28, -0.18], [15, 700, 34, -0.16], [18, 830, 44, -0.16], [21, 980, 120, -0.08], [23.5, 1120, 240, -0.02], [26, 1260, 360, 0.16], [29, 1400, 420, 0.24]],
+    sky: [[0, 214, 186, 158, 250, 228, 196, 255, 226, 186, 0.17], [12, 214, 186, 158, 250, 228, 196, 255, 226, 186, 0.17], [22, 72, 62, 58, 176, 140, 112, 238, 176, 136, 0.2], [30, 30, 30, 36, 110, 98, 92, 196, 136, 112, 0.16]],
+    sun: [[0, 0.5], [12, 0.34], [23, 0.07], [30, 0.03]], az: -0.7, halo: [96, 160, 240],
+  },
+];
+
+function routeTime(flight) {
+  let f = flight;
+  for (const land of LANDINGS) {
+    if (f < land.at) return { f, land: null, e: 0 };
+    if (f < land.at + land.time) return { f: land.at, land, e: f - land.at };
+    f -= land.time;
+  }
+  return { f, land: null, e: 0 };
+}
+
+function drawLandingBody(space, f) {
+  for (const land of LANDINGS) {
+    const coming = (f - land.at + 5) / 5;
+    const going = (f - land.at) / 3.5;
+    if (coming <= 0 || going >= 1) continue;
+    if (f <= land.at) {
+      const radius = 0.03 * Math.exp(Math.pow(coming, 1.4) * Math.log(300));
+      drawBody(space, land.body, f, 0, radius * 0.86 * smooth(0.35, 1, coming), radius, -0.55, -0.3, 0.78, smooth(0, 0.1, coming), 0);
+    } else {
+      const radius = mix(9, 1.2, Math.pow(going, 0.7));
+      const limb = mix(-1.26, space.fill + 0.2, going * going);
+      drawBody(space, land.body, f, 0, limb + radius, radius, -0.55, -0.3, 0.78, 1, 0);
+    }
+  }
+}
+
+function lerp4(map, idx, u, v) {
+  return mix(mix(map[idx], map[idx + 1], u), mix(map[idx + ALIEN_W], map[idx + ALIEN_W + 1], u), v);
+}
+
+function drawAlien(space, land, e) {
+  const { cols, rows, red, green, blue, mark, depth } = space;
+  const { height, light, tintR, tintG, tintB } = land.map;
+  mark.fill(0);
+  const { z: camZ, alt, tilt } = flightAt(e, land.flight);
+  const camX = alienX(camZ);
+  const yaw = Math.atan((alienX(camZ + 6) - alienX(camZ - 6)) / 12);
+  const bend = (alienX(camZ + 12) - 2 * camX + alienX(camZ - 12)) / 144;
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+  const topR = keyed(land.sky, e, 1);
+  const topG = keyed(land.sky, e, 2);
+  const topB = keyed(land.sky, e, 3);
+  const lowR = keyed(land.sky, e, 4);
+  const lowG = keyed(land.sky, e, 5);
+  const lowB = keyed(land.sky, e, 6);
+  const beamR = keyed(land.sky, e, 7);
+  const beamG = keyed(land.sky, e, 8);
+  const beamB = keyed(land.sky, e, 9);
+  const ambient = keyed(land.sky, e, 10);
+  const sunEl = keyed(land.sun, e);
+  const sunTan = Math.tan(sunEl);
+  const sunPx = Math.tan(land.az - yaw);
+
+  const focal = cols * 0.62;
+  const stretch = focal / CELL;
+  const center = cols / 2;
+  const slope = Math.tan(bend * 26 + 0.05 * Math.sin(e * 0.5)) / CELL;
+  const horizon = rows * (0.4 - tilt);
+  const far = 900 + alt;
+  const start = Math.max(0.6, alt * 0.012);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      const dc = c - center;
+      const px = dc / focal;
+      const rise = ((horizon + slope * dc - r) * CELL) / focal;
+      const up = rise > 0 ? rise : 0;
+      const k = 1 - Math.exp(-up * 3);
+      let lr = mix(lowR, topR, k);
+      let lg = mix(lowG, topG, k);
+      let lb = mix(lowB, topB, k);
+      const off = Math.hypot(px - sunPx, rise - sunTan);
+      if (off < 1.2) {
+        const halo = Math.exp(-off / 0.16) * mix(0.55, 0.16, smooth(0.08, 0.3, sunEl));
+        lr += land.halo[0] * halo;
+        lg += land.halo[1] * halo;
+        lb += land.halo[2] * halo;
+        if (off < 0.02) lr = lg = lb = 420;
+      }
+      red[i] = lr;
+      green[i] = lg;
+      blue[i] = lb;
+      depth[i] = 1e9;
+    }
+  }
+
+  const cam = { x: camX, z: camZ, sin: sinYaw, cos: cosYaw, yaw, alt, horizon, slope, focal, stretch, center, e };
+  land.decor(space, cam);
+
+  for (let c = 0; c < cols; c++) {
+    const px = (c - center) / focal;
+    const dirX = sinYaw + px * cosYaw;
+    const dirZ = cosYaw - px * sinYaw;
+    const hz = horizon + slope * (c - center);
+    let bottom = rows;
+    let dz = start;
+    for (let z = start * 3; z < far; z += dz, dz *= 1.0135) {
+      const wx = camX + dirX * z;
+      const wz = camZ + dirZ * z;
+      const fi = wx / WORLD_STEP;
+      const fj = wz / WORLD_STEP;
+      const i = ((Math.floor(fi) % ALIEN_W) + ALIEN_W) % ALIEN_W;
+      const j = clamp(Math.floor(fj), 0, ALIEN_L - 2);
+      const idx = j * ALIEN_W + i;
+      let land0 = height[idx];
+      if (z < 110 && i + 1 < ALIEN_W) {
+        const a = fi - Math.floor(fi);
+        const b = clamp(fj - j);
+        land0 = mix(mix(land0, height[idx + 1], a), mix(height[idx + ALIEN_W], height[idx + ALIEN_W + 1], a), b);
+      }
+      const row = hz + ((alt - land0) / z) * stretch;
+      if (row >= bottom) continue;
+      const first = row < 0 ? 0 : Math.floor(row);
+      const close = z < 140 && i + 1 < ALIEN_W;
+      const u = fi - Math.floor(fi);
+      const v = clamp(fj - j);
+      const sun = close ? lerp4(light, idx, u, v) : light[idx];
+      const tr = close ? lerp4(tintR, idx, u, v) : tintR[idx];
+      const tg = close ? lerp4(tintG, idx, u, v) : tintG[idx];
+      const tb = close ? lerp4(tintB, idx, u, v) : tintB[idx];
+      const haze = land.fog ? 1 - Math.exp(-z * land.fog) : 0;
+      const near = z < 160 ? 1 + (noise(wx * 0.3, wz * 0.3) - 0.5) * 0.3 + (noise(wx * 1.3, wz * 1.3) - 0.5) * 0.24 : 1;
+      const lr = mix((tr / 255) * (ambient * beamR + beamR * sun) * near, lowR, haze);
+      const lg = mix((tg / 255) * (ambient * beamG + beamG * sun) * near, lowG, haze);
+      const lb = mix((tb / 255) * (ambient * beamB + beamB * sun) * near, lowB, haze);
+      for (let r = first; r < bottom; r++) {
+        const cell = r * cols + c;
+        red[cell] = lr;
+        green[cell] = lg;
+        blue[cell] = lb;
+        depth[cell] = z;
+        mark[cell] = 0;
+      }
+      bottom = first;
+      if (bottom <= 0) break;
+    }
+  }
+
+  land.after(space, cam);
+}
+
+function drawLanding(space, view, t, f, land, e, frame) {
+  const edge = Math.min(e, land.time - e);
+  if (edge >= DISSOLVE) {
+    drawAlien(space, land, e);
+    resolve(space, frame, 1);
+    return;
+  }
+  drawCosmos(space, view, t, f, 0);
+  resolve(space, frame);
+  drawAlien(space, land, e);
+  resolve(space, space.other, 1);
+  dissolve(frame, space.other, smooth(0, DISSOLVE, edge));
 }
 
 function drawSpace(space, view, t, f, dt, frame) {
@@ -3437,10 +4139,556 @@ function fadeFrame(frame, k) {
   }
 }
 
+function drawDrop(scene, frame, x, y, radius, stretch) {
+  const { cols, rows } = scene;
+  const size = scene.size;
+  const wide = radius * size;
+  const tall = (radius * size) / CELL;
+  if (wide < 0.4) return;
+  const col = x * size + scene.cx;
+  const row = (y * size) / CELL + scene.cy;
+  const left = Math.max(0, Math.floor(col - wide * 1.4));
+  const right = Math.min(cols - 1, Math.ceil(col + wide * 1.4));
+  const top = Math.max(0, Math.floor(row - tall * (stretch + 0.4)));
+  const bottom = Math.min(rows - 1, Math.ceil(row + tall * 1.4));
+  const fromR = frame.r.slice();
+  const fromG = frame.g.slice();
+  const fromB = frame.b.slice();
+  const fromC = frame.ch.slice();
+
+  for (let r = top; r <= bottom; r++) {
+    for (let c = left; c <= right; c++) {
+      const i = r * cols + c;
+      const nx = (c - col) / wide;
+      const ny = (r - row) / tall;
+      const span = ny >= 0 ? Math.sqrt(Math.max(1 - ny * ny, 0)) : Math.pow(Math.max(1 + ny / stretch, 0), 1.35);
+      const edge = span > 0 ? Math.abs(nx) / span : 2;
+      if (edge >= 1) {
+        const shadow = smooth(1.5, 1, edge) * smooth(-0.2, 0.5, ny + nx * 0.4) * 0.42;
+        frame.r[i] *= 1 - shadow;
+        frame.g[i] *= 1 - shadow;
+        frame.b[i] *= 1 - shadow;
+        continue;
+      }
+      const dome = Math.sqrt(1 - edge * edge);
+      const sc = clamp(Math.round(col - nx * wide * 0.9), 0, cols - 1);
+      const sr = clamp(Math.round(row - ny * tall * 0.9), 0, rows - 1);
+      const from = sr * cols + sc;
+      const lens = 0.42 + 0.62 * dome;
+      let cr = fromR[from] * lens * 0.7 + 26;
+      let cg = fromG[from] * lens * 0.84 + 52;
+      let cb = fromB[from] * lens + 96;
+      const rim = gauss(edge - 0.93, 0.08) * 0.7;
+      cr = mix(cr, 224, rim);
+      cg = mix(cg, 238, rim);
+      cb = mix(cb, 255, rim);
+      const caustic = gauss(ny - 0.58, 0.2) * gauss(nx, 0.5) * 0.85;
+      cr = mix(cr, 240, caustic);
+      cg = mix(cg, 248, caustic);
+      cb = mix(cb, 255, caustic);
+      const spec = gauss(nx + 0.32, 0.24) * gauss(ny + 0.32, 0.3);
+      cr = mix(cr, 255, spec);
+      cg = mix(cg, 255, spec);
+      cb = mix(cb, 255, spec);
+      frame.ch[i] = spec > 0.5 ? 64 : caustic > 0.5 ? 56 : fromC[from];
+      frame.r[i] = clamp(cr, 0, 255);
+      frame.g[i] = clamp(cg, 0, 255);
+      frame.b[i] = clamp(cb, 0, 255);
+      frame.backR[i] = clamp(cr * 0.5, 0, 255);
+      frame.backG[i] = clamp(cg * 0.5, 0, 255);
+      frame.backB[i] = clamp(cb * 0.5, 0, 255);
+    }
+  }
+}
+
+function tearRun(run) {
+  return 0.03 * (run + 0.56 * Math.sin(1.6 * run)) + 0.001 * run * run;
+}
+
+function drawTear(scene, eye, frame) {
+  const { cols, rows, low, X, Y } = scene;
+  const t = eye.tear;
+  const fade = smooth(TEAR_END, TEAR_END - 1.6, t);
+  const fromX = 0.7;
+  const lidCol = clamp(Math.round(fromX * scene.size + scene.cx), 0, cols - 1);
+  const lid = low[lidCol];
+  const pathX = (y) => fromX + 0.05 * Math.sin((y - lid) * 4.2) + 0.09 * (y - lid) * (y - lid);
+  const glaze = (x, y, k, ch) => {
+    const col = Math.round(x * scene.size + scene.cx);
+    const row = Math.round((y * scene.size) / CELL + scene.cy);
+    if (col < 0 || col >= cols || row < 0 || row >= rows) return;
+    const i = row * cols + col;
+    frame.r[i] = mix(frame.r[i], 214, k);
+    frame.g[i] = mix(frame.g[i], 232, k);
+    frame.b[i] = mix(frame.b[i], 252, k);
+    if (ch) frame.ch[i] = ch;
+  };
+
+  const pool = smooth(0, 2.2, t) * mix(1, 0.45, smooth(TEAR_SPILL, TEAR_SPILL + 0.8, t)) * fade;
+  for (let c = 0; c < cols; c++) {
+    const x = X[c];
+    if (x < -0.78 || x > 0.94) continue;
+    const depth = pool * (0.026 + 0.05 * gauss(x - fromX, 0.24));
+    for (let r = 0; r < rows; r++) {
+      const y = Y[r];
+      if (y > low[c] + 0.012) break;
+      if (y < low[c] - depth) continue;
+      const shimmer = 0.5 + 0.5 * Math.sin(x * 34 + t * 2.6 + Math.sin(x * 9 - t) * 2);
+      const i = r * cols + c;
+      const k = pool * (0.42 + 0.5 * shimmer * shimmer);
+      frame.r[i] = mix(frame.r[i], 200, k);
+      frame.g[i] = mix(frame.g[i], 226, k);
+      frame.b[i] = mix(frame.b[i], 255, k);
+      if (shimmer > 0.8) frame.ch[i] = 126;
+    }
+  }
+
+  const run = Math.max(t - TEAR_SPILL, 0);
+  const head = lid + 0.024 + tearRun(run);
+  const pace = run > 0 ? 0.5 * (1 + 0.9 * Math.cos(1.6 * run)) : 0;
+
+  for (let y = lid; y < head; y += 0.008) {
+    const age = (head - y) * 3;
+    const glint = Math.pow(0.5 + 0.5 * Math.sin(y * 48 + t * 0.8), 5);
+    const k = fade * (0.16 + 0.1 * smooth(1.6, 0, age) + 0.62 * glint);
+    glaze(pathX(y), y, k, glint > 0.6 ? 124 : 0);
+    glaze(pathX(y) + 1 / scene.size, y, k * 0.45, 0);
+  }
+
+  for (let k = 0; k < 4; k++) {
+    const at = (Math.PI + k * TAU) / 1.6;
+    if (run < at + 0.2) continue;
+    const y = lid + 0.024 + tearRun(at);
+    const size = (0.036 - k * 0.005) * smooth(at + 0.2, at + 0.7, run) * fade;
+    drawDrop(scene, frame, pathX(y) + 0.003, y, size, 1.15);
+  }
+
+  const swell = smooth(0.9, TEAR_SPILL, t) * mix(1, 0.68, smooth(0, 9, run)) * fade;
+  const radius = 0.115 * swell * (1 + 0.16 * (1 - pace));
+  drawDrop(scene, frame, pathX(head), head, radius, 1.25 + 1.5 * pace);
+}
+
+const titleArc = (cx, cy, rx, ry, from, to) => {
+  const points = [];
+  for (let k = 0; k <= 22; k++) {
+    const angle = (mix(from, to, k / 22) * Math.PI) / 180;
+    points.push([cx + rx * Math.cos(angle), cy + ry * Math.sin(angle)]);
+  }
+  return points;
+};
+
+const TITLE_GLYPHS = {
+  S: { w: 0.66, lines: [[...titleArc(0.34, 0.26, 0.3, 0.26, -25, -270), ...titleArc(0.34, 0.76, 0.32, 0.24, -90, 160)]] },
+  E: { w: 0.58, lines: [[[0.58, 0], [0, 0], [0, 1], [0.58, 1]], [[0, 0.5], [0.46, 0.5]]] },
+  I: { w: 0, lines: [[[0, 0], [0, 1]]] },
+  J: { w: 0.5, lines: [[[0.5, 0], [0.5, 0.72], ...titleArc(0.26, 0.72, 0.24, 0.28, 0, 170)]] },
+  U: { w: 0.64, lines: [[[0, 0], [0, 0.68], ...titleArc(0.32, 0.68, 0.32, 0.32, 180, 0), [0.64, 0]]] },
+  R: { w: 0.62, lines: [[[0, 1], [0, 0], [0.34, 0], ...titleArc(0.34, 0.27, 0.27, 0.27, -90, 90), [0, 0.54]], [[0.3, 0.54], [0.62, 1]]] },
+  O: { w: 0.76, lines: [titleArc(0.38, 0.5, 0.38, 0.5, 0, 360)] },
+};
+const TITLE = 'SEIJURIO';
+const TITLE_LINE = ['P R E S E N T E D   &   M A D E   B Y', 'PRESENTED & MADE BY'];
+
+function twinkle(space, sky, t) {
+  const { n, red, green, blue, mark } = space;
+  const stars = Math.floor(n / 150);
+  for (let k = 0; k < stars; k++) {
+    const i = Math.floor(hash(k, 1.3) * n);
+    const lit = sky * (0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(t * (1 + hash(k, 2.2) * 2.4) + k), 2)) * (70 + 150 * hash(k, 3.7));
+    red[i] += lit * 0.86;
+    green[i] += lit * 0.92;
+    blue[i] += lit;
+    mark[i] = lit > 130 ? 42 : 46;
+  }
+}
+
+function buildIntro(cols, rows) {
+  const gap = 0.32;
+  const units = [...TITLE].reduce((sum, letter) => sum + TITLE_GLYPHS[letter].w + gap, -gap);
+  const height = Math.min((cols * 0.82) / units, rows * CELL * 0.38);
+  const left = (cols - units * height) / 2;
+  const top = (rows * CELL - height) / 2 + height * 0.14;
+  const thick = Math.max(0.105 * height, 1);
+  const segments = [];
+  let pen = left;
+  for (const letter of TITLE) {
+    const glyph = TITLE_GLYPHS[letter];
+    for (const line of glyph.lines) {
+      for (let k = 1; k < line.length; k++) {
+        segments.push([pen + line[k - 1][0] * height, top + line[k - 1][1] * height, pen + line[k][0] * height, top + line[k][1] * height]);
+      }
+    }
+    pen += (glyph.w + gap) * height;
+  }
+
+  const n = cols * rows;
+  const intro = {
+    cols, rows, n,
+    left,
+    width: units * height,
+    row: Math.round((top - height * 0.36) / CELL),
+    mask: new Float32Array(n),
+    crest: new Float32Array(n),
+    halo: new Float32Array(n),
+    birth: new Float32Array(n),
+    dots: [],
+  };
+  const reach = height * 0.5;
+  const unit = Math.min(cols, rows * CELL) / 2;
+  for (let r = 0; r < rows; r++) {
+    const py = r * CELL;
+    if (py < top - reach || py > top + height + reach) continue;
+    for (let c = 0; c < cols; c++) {
+      if (c < left - reach || c > left + units * height + reach) continue;
+      let best = 1e9;
+      for (const [x1, y1, x2, y2] of segments) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const along = clamp(((c - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy + 1e-6));
+        const d = (c - x1 - dx * along) ** 2 + (py - y1 - dy * along) ** 2;
+        if (d < best) best = d;
+      }
+      const d = Math.sqrt(best);
+      const i = r * cols + c;
+      intro.mask[i] = smooth(thick + 0.5, thick - 0.6, d);
+      intro.crest[i] = clamp(1 - d / thick);
+      intro.halo[i] = Math.exp(-d / (height * 0.13));
+      intro.birth[i] = 0.7 + (1.5 * (c - left)) / (units * height) + 0.42 * hash(c * 0.31, r * 0.77);
+      if (intro.mask[i] > 0.5) {
+        intro.dots.push({ x: (c - cols / 2) / unit, y: ((r - rows / 2) * CELL) / unit, leave: 5 + 0.9 * hash(c * 0.13, r * 0.51) });
+      }
+    }
+  }
+  return intro;
+}
+
+function drawIntro(intro, space, t, frame) {
+  const { cols, rows, n, left, width, mask, crest, halo, birth } = intro;
+  const { red, green, blue, mark } = space;
+  red.fill(0);
+  green.fill(0);
+  blue.fill(0);
+  mark.fill(0);
+
+  twinkle(space, smooth(0, 0.9, t) * smooth(6.9, 5.7, t), t);
+
+  const breath = 0.86 + 0.14 * Math.sin(t * 2);
+  const sweepAt = ((t - 2.7) / 1.8) * 1.5 - 0.25;
+  for (let i = 0; i < n; i++) {
+    if (halo[i] <= 0) continue;
+    const c = i % cols;
+    const on = smooth(birth[i], birth[i] + 0.36, t);
+    const glow = 62 * halo[i] * smooth(1.2, 2.6, t) * smooth(5.8, 4.9, t) * breath;
+    red[i] += glow * 0.3;
+    green[i] += glow * 0.62;
+    blue[i] += glow * 1.3;
+    if (mask[i] <= 0) continue;
+    const leave = 5 + 0.9 * hash(c * 0.13, (i - c) / cols * 0.51);
+    const lit = mask[i] * on * smooth(leave + 0.12, leave, t);
+    if (lit <= 0) continue;
+    const flash = gauss(t - birth[i] - 0.2, 0.16);
+    const sweep = gauss((c - left) / width - sweepAt, 0.075);
+    const edge = crest[i];
+    const r = mix(30, 176, edge * edge) + flash * 240 + sweep * 240;
+    const g = mix(104, 226, edge) + flash * 240 + sweep * 210;
+    const b = mix(238, 255, edge) + flash * 240 + sweep * 140;
+    red[i] += r * lit;
+    green[i] += g * lit;
+    blue[i] += b * lit;
+  }
+
+  const aim = (0.05 * rows * CELL) / space.unit;
+  if (t > 5) {
+    const every = Math.max(1, Math.floor(intro.dots.length / 6000));
+    for (let k = 0; k < intro.dots.length; k += every) {
+      const dot = intro.dots[k];
+      if (t < dot.leave) continue;
+      const p = clamp((t - dot.leave) / 1.5);
+      const fall = p * p * (3 - 2 * p);
+      const turn = fall * 1.9;
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const x = (dot.x * cos - dot.y * sin) * (1 - fall);
+      const y = (dot.x * sin + dot.y * cos) * (1 - fall) + aim * fall;
+      const lit = (1 - p * p * p) * every * 1.1;
+      plot(space, x, y, 120 * lit, 190 * lit, 255 * lit);
+    }
+    const seed = gauss(t - 6.6, 0.42);
+    if (seed > 0.01) addGlow(space, 0, aim, 0.02 + 0.05 * seed, 420 * seed, 620 * seed, 900 * seed);
+  }
+
+  resolve(space, frame);
+
+  const fade = smooth(1.3, 2.1, t) * smooth(5, 4.4, t);
+  if (fade > 0.02) {
+    const line = TITLE_LINE.find((text) => text.length < cols - 4) || TITLE_LINE[1];
+    const from = Math.floor((cols - line.length) / 2);
+    const r = Math.round(intro.row);
+    for (let k = 0; k < line.length; k++) {
+      const c = from + k;
+      if (r < 0 || r >= rows || c < 0 || c >= cols || line[k] === ' ') continue;
+      const i = r * cols + c;
+      frame.ch[i] = line.charCodeAt(k);
+      frame.r[i] = 196 * fade;
+      frame.g[i] = 210 * fade;
+      frame.b[i] = 232 * fade;
+      frame.backR[i] = frame.backG[i] = frame.backB[i] = 0;
+    }
+  }
+}
+
+const FONT = (
+  '0000000000 00005f0000 0007000700 147f147f14 242a7f2a12 2313086462 3649562050 0008070300 001c224100 0041221c00 '
+  + '2a1c7f1c2a 08083e0808 0080703000 0808080808 0000606000 2010080402 3e5149453e 00427f4000 7249494946 2141494d33 '
+  + '1814127f10 2745454539 3c4a494931 4121110907 3649494936 464949291e 0000140000 0040340000 0008142241 1414141414 '
+  + '0041221408 0201590906 3e415d594e 7c1211127c 7f49494936 3e41414122 7f4141413e 7f49494941 7f09090901 3e41415173 '
+  + '7f0808087f 00417f4100 2040413f01 7f08142241 7f40404040 7f021c027f 7f0408107f 3e4141413e 7f09090906 3e4151215e '
+  + '7f09192946 2649494932 03017f0103 3f4040403f 1f2040201f 3f4038403f 6314081463 0304780403 6159494d43'
+).split(' ');
+
+const plainCaps = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+function fontDot(code, x, y) {
+  const glyph = FONT[code - 32];
+  if (!glyph || x < 0 || x > 4 || y < 0 || y > 7) return 0;
+  return (parseInt(glyph.slice(x * 2, x * 2 + 2), 16) >> y) & 1;
+}
+
+const SOURCE_LINES = readFileSync(__filename, 'utf8').split('\n').length.toLocaleString('fr-FR').replace(/\s/g, ' ');
+
+const CREDITS = [
+  'EPISODE I',
+  'UN UNIVERS EN CARACTERES',
+  '',
+  'Concu et realise par',
+  'SEIJURIO',
+  '',
+  'Aucune image.',
+  'Aucune video.',
+  'Rien que du texte :',
+  'chaque planete est',
+  'calculee en direct, dans',
+  'votre terminal.',
+  '',
+  'LE MOTEUR',
+  'JavaScript et Node.js',
+  'Zero dependance',
+  'Un seul fichier',
+  `${SOURCE_LINES} lignes de code`,
+  '',
+  "L'AFFICHAGE",
+  'Caracteres ASCII',
+  'Couleurs 24 bits',
+  '30 images par seconde',
+  'AppleScript pour le',
+  'plein ecran',
+  '',
+  'LA PHYSIQUE',
+  'Relativite generale',
+  'pour le trou noir',
+  'Orbites par Runge-Kutta',
+  'Gravite simulee pour',
+  'la collision',
+  'Potentiel de Roche pour',
+  'les etoiles doubles',
+  '',
+  'LES DECORS',
+  'Bruit fractal',
+  'Lancer de rayons',
+  'Reflets de Fresnel',
+  'Vol en Catmull-Rom',
+  '',
+  'Villes et paysages',
+  'sont inventes.',
+  "Aucune etoile n'a ete",
+  'blessee.',
+  '',
+  'Que la Force soit avec',
+  'votre terminal.',
+];
+
+function buildCrawl(cols, rows) {
+  const lines = CREDITS.map(plainCaps);
+  const width = CRAWL_WIDTH * 6;
+  const height = lines.length * 11;
+  const base = new Float32Array(width * height);
+  lines.forEach((line, row) => {
+    const left = Math.floor((width - line.length * 6) / 2);
+    for (let k = 0; k < line.length; k++) {
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 5; x++) {
+          if (fontDot(line.charCodeAt(k), x, y)) base[(row * 11 + y) * width + left + k * 6 + x] = 1;
+        }
+      }
+    }
+  });
+
+  const levels = [{ map: base, w: width, h: height }];
+  for (let k = 0; k < 3; k++) {
+    const { map, w, h } = levels[k];
+    const nextW = w >> 1;
+    const nextH = h >> 1;
+    const next = new Float32Array(nextW * nextH);
+    for (let y = 0; y < nextH; y++) {
+      for (let x = 0; x < nextW; x++) {
+        next[y * nextW + x] = (map[y * 2 * w + x * 2] + map[y * 2 * w + x * 2 + 1] + map[(y * 2 + 1) * w + x * 2] + map[(y * 2 + 1) * w + x * 2 + 1]) / 4;
+      }
+    }
+    levels.push({ map: next, w: nextW, h: nextH });
+  }
+
+  const horizon = rows * 0.08;
+  const depth = rows - horizon;
+  const scale = (cols * 0.9) / width;
+  const stretch = (depth * CELL) / scale / 1.5;
+  return { lines, width, height, levels, horizon, depth, scale, stretch, flat: scale < 1.1, total: height + stretch * 2.1 + 30 };
+}
+
+function sampleText({ map, w, h }, x, y) {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  if (ix < 0 || iy < 0 || ix + 1 >= w || iy + 1 >= h) return 0;
+  const fx = x - ix;
+  const fy = y - iy;
+  const i = iy * w + ix;
+  return mix(mix(map[i], map[i + 1], fx), mix(map[i + w], map[i + w + 1], fx), fy);
+}
+
+function drawLogo(space, age, life) {
+  const { cols, rows, red, green, blue } = space;
+  const word = 'GALAXY';
+  const size = ((cols * 1.3) / (word.length * 6)) * Math.exp(-age * 0.58);
+  const fade = smooth(0, 0.3, age) * smooth(life, life - 1.8, age);
+  for (let r = 0; r < rows; r++) {
+    const v = ((r - rows / 2) * CELL) / size + 3.5;
+    if (v < 0 || v >= 7) continue;
+    for (let c = 0; c < cols; c++) {
+      const u = (c - cols / 2) / size + (word.length * 6 - 1) / 2;
+      if (u < 0 || u >= word.length * 6) continue;
+      const slot = Math.floor(u / 6);
+      if (!fontDot(word.charCodeAt(slot), Math.floor(u - slot * 6), Math.floor(v))) continue;
+      const i = r * cols + c;
+      red[i] += 120 * fade;
+      green[i] += 330 * fade;
+      blue[i] += 760 * fade;
+    }
+  }
+}
+
+function drawCrawl(space, t) {
+  const { cols, rows, red, green, blue, crawl } = space;
+  const { width, levels, horizon, depth, scale, stretch } = crawl;
+  const p = (t - CRAWL_AT) / (CREDITS_TIME - CRAWL_AT);
+  const scroll = p * crawl.total - 22;
+  for (let r = Math.ceil(horizon) + 1; r < rows; r++) {
+    const y = (r - horizon) / depth;
+    const line = scroll - stretch * (1 / y - 1);
+    if (line < -12 || line > crawl.height) continue;
+    const across = 1 / (scale * y);
+    const down = (stretch / depth) / (y * y);
+    const level = Math.min(3, Math.max(0, Math.floor(Math.log2(Math.max(across, down)))));
+    const shrink = 1 << level;
+    const fade = smooth(0.1, 0.42, y);
+    for (let c = 0; c < cols; c++) {
+      const u = (c - cols / 2) * across + width / 2;
+      const ink = sampleText(levels[level], u / shrink, line / shrink);
+      if (ink < 0.2) continue;
+      const i = r * cols + c;
+      const lit = smooth(0.22, 0.5, ink) * fade;
+      red[i] += 120 * lit;
+      green[i] += 330 * lit;
+      blue[i] += 760 * lit;
+    }
+  }
+}
+
+function writeLine(space, frame, row, text, r, g, b) {
+  const { cols, rows } = space;
+  if (row < 0 || row >= rows) return;
+  const from = Math.floor((cols - text.length) / 2);
+  for (let k = 0; k < text.length; k++) {
+    const c = from + k;
+    if (c < 0 || c >= cols || text[k] === ' ') continue;
+    const i = row * cols + c;
+    frame.ch[i] = text.charCodeAt(k);
+    frame.r[i] = r;
+    frame.g[i] = g;
+    frame.b[i] = b;
+    frame.backR[i] = frame.backG[i] = frame.backB[i] = 0;
+  }
+}
+
+function drawCredits(space, t, frame) {
+  const { rows, red, green, blue, mark, crawl } = space;
+  red.fill(0);
+  green.fill(0);
+  blue.fill(0);
+  mark.fill(0);
+  const fade = smooth(0, 1.5, t) * smooth(CREDITS_TIME, CREDITS_TIME - 3, t);
+  twinkle(space, fade, t);
+  if (t > 5.2 && t < 12.2) drawLogo(space, t - 5.2, 7);
+  if (t > CRAWL_AT && !crawl.flat) drawCrawl(space, t);
+  resolve(space, frame, 1);
+  for (let i = 0; i < space.n; i++) {
+    if (mark[i]) frame.backR[i] = frame.backG[i] = frame.backB[i] = 0;
+  }
+
+  const hello = smooth(0.6, 1.6, t) * smooth(5, 4, t);
+  if (hello > 0.02) {
+    const mid = Math.floor(rows / 2);
+    writeLine(space, frame, mid - 1, 'Il y a bien longtemps, dans un terminal lointain,', 70 * hello, 190 * hello, 220 * hello);
+    writeLine(space, frame, mid + 1, 'très lointain....', 70 * hello, 190 * hello, 220 * hello);
+  }
+  if (crawl.flat && t > CRAWL_AT) {
+    const p = (t - CRAWL_AT) / (CREDITS_TIME - CRAWL_AT);
+    const top = rows - p * (rows + crawl.lines.length * 2);
+    crawl.lines.forEach((line, k) => {
+      const row = Math.round(top + k * 2);
+      const lit = fade * smooth(0, rows * 0.3, row);
+      writeLine(space, frame, row, line, 96 * lit, 176 * lit, 255 * lit);
+    });
+  }
+}
+
+function skipToEnd(show) {
+  const { eye } = show;
+  if (show.credits >= 0) {
+    show.credits = CREDITS_TIME;
+    return;
+  }
+  if (show.ending) {
+    eye.tear = 0;
+    return;
+  }
+  const held = LANDINGS.reduce((sum, land) => sum + land.time, 0);
+  const target = ZOOM_AT + ZOOM_TIME + GALAXY_HOLD + held + JOURNEY_END - 4;
+  if (show.clock >= target) return;
+  show.clock = target;
+  show.flare = 1;
+  lockEye(eye);
+  eye.x = eye.y = eye.vx = eye.vy = 0;
+  eye.lid = 1;
+  eye.closing = 0;
+  eye.pupil = 0.64;
+  eye.tear = 0;
+  eye.squeezed = false;
+}
+
+function flareFrame(frame, k) {
+  for (let i = 0; i < frame.ch.length; i++) {
+    frame.r[i] = mix(frame.r[i], 255, k);
+    frame.g[i] = mix(frame.g[i], 240, k);
+    frame.b[i] = mix(frame.b[i], 214, k);
+    frame.backR[i] = mix(frame.backR[i], 255, k);
+    frame.backG[i] = mix(frame.backG[i], 240, k);
+    frame.backB[i] = mix(frame.backB[i], 214, k);
+  }
+}
+
 function createShow() {
   const eye = createEye();
   eye.lid = 0;
-  return { clock: 0, eye, depth: 0, flinched: false, view: { x: 0, y: 0, scale: 0.1, form: 0, veil: 1, sunX: 0, sunY: 0, sunR: 1 } };
+  return { clock: 0, eye, depth: 0, flinched: false, wept: false, flare: 0, ending: false, closing: false, credits: -1, view: { x: 0, y: 0, scale: 0.1, form: 0, veil: 1, sunX: 0, sunY: 0, sunR: 1 } };
 }
 
 function emergeFromSun(show, scene, space, outro) {
@@ -3453,6 +4701,10 @@ function emergeFromSun(show, scene, space, outro) {
   eye.zoom = Math.exp(Math.log(show.depth) * (1 - p));
   eye.ember = smooth(7.4, 3, outro);
   if (outro > 4.2 && eye.mood === MOODS.locked) eye.mood = MOODS.dazzled;
+  if (outro > 7.4 && !eye.tear && !show.wept) {
+    show.wept = true;
+    eye.tear = 0.01;
+  }
   if (outro > 6.6 && !show.flinched) {
     show.flinched = true;
     blink(eye, 1);
@@ -3471,19 +4723,27 @@ function wakeEye(eye) {
   eye.portal = false;
   eye.zoom = 1;
   eye.ember = 0;
-  eye.mood = MOODS.calm;
-  eye.nextLook = eye.t + 0.8;
-  eye.nextFocus = eye.t + 2;
-  eye.nextMood = eye.t + 6;
-  eye.nextBlink = eye.t + rand(2, 4);
+  eye.mood = MOODS.weeping;
+  eye.nextLook = eye.t + 11;
+  eye.nextFocus = eye.t + 12;
+  eye.nextMood = eye.t + 13;
+  eye.nextBlink = eye.t + 12;
 }
 
 function playShow(show, scene, space, dt, frame) {
   const { eye, view } = show;
+  if (show.credits >= 0) {
+    show.credits += dt;
+    drawCredits(space, show.credits, frame);
+    if (show.credits >= CREDITS_TIME) Object.assign(show, createShow());
+    return;
+  }
   show.clock += dt;
+  if (show.ending) show.clock = 2;
   const { clock } = show;
   const zoomEnd = ZOOM_AT + ZOOM_TIME;
-  const flight = clock - zoomEnd - GALAXY_HOLD;
+  const route = routeTime(clock - zoomEnd - GALAXY_HOLD);
+  const flight = route.f;
   const outro = flight - JOURNEY_END;
   const diving = clock < zoomEnd;
   const inEye = diving || outro >= 0;
@@ -3491,6 +4751,15 @@ function playShow(show, scene, space, dt, frame) {
   if (diving && clock > LOCK_AT && eye.mood !== MOODS.locked) lockEye(eye);
   if (inEye) updateEye(eye, dt);
   if (outro >= 0) emergeFromSun(show, scene, space, outro);
+  if (show.ending) {
+    if (!eye.tear && !show.closing) {
+      show.closing = true;
+      blink(eye, 1);
+      eye.lazy = 5;
+      eye.closing = 1e3;
+    }
+    if (show.closing && eye.lid < 0.04) show.credits = 0;
+  }
 
   if (clock >= FORM_AT) {
     if (diving) {
@@ -3507,17 +4776,81 @@ function playShow(show, scene, space, dt, frame) {
     }
     view.form = smooth(FORM_AT, ZOOM_AT + 4.5, clock);
     view.veil = smooth(ZOOM_AT + 1.5, FORM_AT + 1, clock);
-    drawSpace(space, view, clock - FORM_AT, flight, dt, frame);
+    if (route.land) drawLanding(space, view, clock - FORM_AT, flight, route.land, route.e, frame);
+    else drawSpace(space, view, clock - FORM_AT, flight, dt, frame);
   }
 
   if (inEye) drawFrame(scene, eye, frame);
+  if (inEye && eye.tear > 0) drawTear(scene, eye, frame);
+  if (show.flare > 0) {
+    flareFrame(frame, Math.pow(show.flare, 1.5));
+    show.flare = Math.max(show.flare - dt / 0.9, 0);
+  }
   if (clock < 1.5) fadeFrame(frame, clock / 1.5);
 
   if (outro >= OUTRO_TIME) {
     wakeEye(eye);
-    Object.assign(show, createShow(), { clock: 2, eye });
+    Object.assign(show, createShow(), { clock: 2, eye, ending: true });
     resetView(scene);
   }
+}
+
+function osascript(lines, timeout = 20000) {
+  try {
+    const args = lines.flatMap((line) => ['-e', line]);
+    return execFileSync('osascript', args, { encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function enterStage() {
+  if (process.env.TERM_PROGRAM !== 'Apple_Terminal') return null;
+  const found = osascript([
+    'tell application "Terminal"',
+    'set w to front window',
+    'set t to selected tab of w',
+    'set oldProfile to name of current settings of t',
+    'set oldFont to font size of t',
+    'set oldBounds to bounds of w',
+    'set oldZoom to zoomed of w',
+    `set font size of t to ${STAGE_FONT}`,
+    'set background color of t to {0, 0, 0}',
+    'set AppleScript\'s text item delimiters to ","',
+    'return (id of w as text) & "|" & (id of t as text) & "|" & (oldFont as text) & "|" & oldProfile & "|" & (oldZoom as text) & "|" & (oldBounds as text)',
+    'end tell',
+  ]);
+  if (!found) return null;
+  const [windowId, tabId, font, profile, zoom, bounds] = found.split('|');
+  const stage = { windowId, tabId, font, profile: profile.replace(/["\\]/g, ''), zoom, bounds, full: false };
+  stage.full = osascript([
+    'tell application "System Events" to tell process "Terminal"',
+    'set value of attribute "AXFullScreen" of front window to true',
+    'end tell',
+  ], 4000) !== null;
+  if (!stage.full) osascript([`tell application "Terminal" to set zoomed of window id ${windowId} to true`], 4000);
+  return stage;
+}
+
+function leaveStage(stage) {
+  if (stage.full) {
+    osascript([
+      'tell application "System Events" to tell process "Terminal"',
+      'set value of attribute "AXFullScreen" of front window to false',
+      'end tell',
+      'delay 1',
+    ], 5000);
+  }
+  osascript([
+    'tell application "Terminal"',
+    `set w to window id ${stage.windowId}`,
+    `set t to tab id ${stage.tabId} of w`,
+    `set current settings of t to settings set "${stage.profile}"`,
+    `set font size of t to ${stage.font}`,
+    `set zoomed of w to ${stage.zoom}`,
+    `set bounds of w to {${stage.bounds}}`,
+    'end tell',
+  ], 5000);
 }
 
 function main() {
@@ -3527,53 +4860,83 @@ function main() {
     process.exit(1);
   }
 
-  let scene, space, frame, prev;
-  const rebuild = () => {
-    scene = buildScene(stdout.columns || 80, stdout.rows || 24);
-    space = buildSpace(scene.cols, scene.rows);
-    frame = createFrame(scene.n);
-    prev = new Float64Array(scene.n).fill(-1);
-    stdout.write(`\x1b[48;2;${BG.join(';')}m\x1b[2J`);
-  };
-
-  let done = false;
-  const quit = () => {
-    if (done) return;
-    done = true;
+  const stage = enterStage();
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
     stdout.write('\x1b[0m\x1b[?25h\x1b[?1049l');
+    if (stage) leaveStage(stage);
+  };
+  const quit = () => {
+    restore();
     process.exit(0);
   };
 
-  stdout.write('\x1b[?1049h\x1b[?25l');
-  rebuild();
-  stdout.on('resize', rebuild);
+  stdout.write(`\x1b[?1049h\x1b[?25l\x1b[48;2;${BG.join(';')}m\x1b[2J`);
+  process.on('exit', restore);
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
+  process.on('SIGHUP', quit);
+  const show = createShow();
+  let opening = 0;
+  let typed = '';
   if (stdin.isTTY) {
     stdin.setRawMode(true);
     stdin.resume();
     stdin.on('data', (d) => {
       const key = d.toString();
       if (key === 'q' || key === 'Q' || key === '\x03' || key === '\x1b') quit();
+      typed = (typed + key.toLowerCase()).slice(-3);
+      if (typed === 'fin') {
+        typed = '';
+        opening = INTRO_TIME;
+        skipToEnd(show);
+      }
     });
   }
 
-  const show = createShow();
-  let last = process.hrtime.bigint();
-  const tick = () => {
-    const now = process.hrtime.bigint();
-    const dt = Math.min(Number(now - last) / 1e9, 0.1);
-    last = now;
-    playShow(show, scene, space, dt, frame);
-    const flushed = stdout.write(encodeFrame(scene, frame, prev));
-    const spent = Number(process.hrtime.bigint() - now) / 1e6;
-    const next = () => setTimeout(tick, Math.max(0, 1000 / FPS - spent));
-    if (flushed) next();
-    else stdout.once('drain', next);
+  let scene, space, frame, prev, intro;
+  const rebuild = () => {
+    scene = buildScene(stdout.columns || 80, stdout.rows || 24);
+    space = buildSpace(scene.cols, scene.rows);
+    intro = buildIntro(scene.cols, scene.rows);
+    frame = createFrame(scene.n);
+    prev = new Float64Array(scene.n).fill(-1);
+    stdout.write(`\x1b[48;2;${BG.join(';')}m\x1b[2J`);
   };
-  tick();
+
+  const start = () => {
+    rebuild();
+    let settle;
+    stdout.on('resize', () => {
+      clearTimeout(settle);
+      settle = setTimeout(rebuild, 250);
+    });
+
+    let last = process.hrtime.bigint();
+    const tick = () => {
+      const now = process.hrtime.bigint();
+      const dt = Math.min(Number(now - last) / 1e9, 0.1);
+      last = now;
+      if (opening < INTRO_TIME) {
+        opening += dt;
+        drawIntro(intro, space, opening, frame);
+      } else {
+        playShow(show, scene, space, dt, frame);
+      }
+      const flushed = stdout.write(encodeFrame(scene, frame, prev));
+      const spent = Number(process.hrtime.bigint() - now) / 1e6;
+      const next = () => setTimeout(tick, Math.max(0, 1000 / FPS - spent));
+      if (flushed) next();
+      else stdout.once('drain', next);
+    };
+    tick();
+  };
+
+  setTimeout(start, stage ? 1400 : 0);
 }
 
 if (require.main === module) main();
 
-module.exports = { ZOOM_AT, ZOOM_TIME, GALAXY_HOLD, JOURNEY, JOURNEY_END, OUTRO_TIME, STAGES, EARTH_AT, GROUND_AT, CLIMB_AT, buildScene, buildSpace, createFrame, createShow, playShow, encodeFrame };
+module.exports = { ZOOM_AT, ZOOM_TIME, GALAXY_HOLD, JOURNEY, JOURNEY_END, OUTRO_TIME, STAGES, EARTH_AT, GROUND_AT, CLIMB_AT, LANDINGS, INTRO_TIME, CREDITS_TIME, buildScene, buildSpace, buildIntro, drawIntro, skipToEnd, createFrame, createShow, playShow, encodeFrame };
