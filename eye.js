@@ -4246,8 +4246,11 @@ function drawTear(scene, eye, frame) {
   }
 
   const run = Math.max(t - TEAR_SPILL, 0);
-  const head = lid + 0.024 + tearRun(run);
   const pace = run > 0 ? 0.5 * (1 + 0.9 * Math.cos(1.6 * run)) : 0;
+  const swell = smooth(0.9, TEAR_SPILL, t) * mix(1, 0.72, smooth(0, 9, run)) * fade;
+  const radius = 0.066 * swell * (1 + 0.16 * (1 - pace));
+  const stretch = 1.25 + 1.5 * pace;
+  const head = lid + 0.05 + radius * stretch + tearRun(run);
 
   for (let y = lid; y < head; y += 0.008) {
     const age = (head - y) * 3;
@@ -4260,14 +4263,12 @@ function drawTear(scene, eye, frame) {
   for (let k = 0; k < 4; k++) {
     const at = (Math.PI + k * TAU) / 1.6;
     if (run < at + 0.2) continue;
-    const y = lid + 0.024 + tearRun(at);
-    const size = (0.036 - k * 0.005) * smooth(at + 0.2, at + 0.7, run) * fade;
+    const y = lid + 0.1 + tearRun(at);
+    const size = (0.026 - k * 0.004) * smooth(at + 0.2, at + 0.7, run) * fade;
     drawDrop(scene, frame, pathX(y) + 0.003, y, size, 1.15);
   }
 
-  const swell = smooth(0.9, TEAR_SPILL, t) * mix(1, 0.68, smooth(0, 9, run)) * fade;
-  const radius = 0.115 * swell * (1 + 0.16 * (1 - pace));
-  drawDrop(scene, frame, pathX(head), head, radius, 1.25 + 1.5 * pace);
+  drawDrop(scene, frame, pathX(head), head, radius, stretch);
 }
 
 const titleArc = (cx, cy, rx, ry, from, to) => {
