@@ -16,7 +16,7 @@ cd galaxysame
 node eye.js
 ```
 
-Le voyage dure environ 3 minutes 20, puis recommence. Appuyez sur `q` pour quitter.
+Le voyage dure près de 5 minutes, puis recommence. Appuyez sur `q` pour quitter.
 
 ## Pour en profiter à fond
 

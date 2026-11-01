@@ -26,6 +26,15 @@ const LENS_SWEEP = Math.PI * 3;
 const LENS_REACH = 30;
 const DISK_IN = 6;
 const DISK_OUT = 16;
+const MERGER_STARS = 9000;
+const WORLD_W = 512;
+const WORLD_L = 1536;
+const WORLD_STEP = 2;
+const WAVE_SIZE = 256;
+const ENTRY_TIME = 5;
+const GROUND_TIME = 36;
+const CLIMB_TIME = 8;
+const DISSOLVE = 1.6;
 
 const MOODS = {
   calm: { wide: 1, squint: 0, brow: 0, pupil: 0.4, red: 0.5, droop: 0, lazy: 1, pace: 1.4, blinks: [2, 6.5] },
@@ -329,6 +338,9 @@ function createFrame(n) {
     r: new Uint8Array(n),
     g: new Uint8Array(n),
     b: new Uint8Array(n),
+    backR: new Uint8Array(n),
+    backG: new Uint8Array(n),
+    backB: new Uint8Array(n),
   };
 }
 
@@ -730,13 +742,20 @@ function encodeFrame(scene, frame, prev) {
   const out = ['\x1b[?2026h'];
   let cursor = -1;
   let color = -1;
+  let backing = -1;
   for (let i = 0; i < n; i++) {
     const packed = (frame.r[i] >> 3) << 10 | (frame.g[i] >> 3) << 5 | frame.b[i] >> 3;
-    const key = frame.ch[i] * 32768 + packed;
+    const back = (frame.backR[i] >> 4) << 8 | (frame.backG[i] >> 4) << 4 | frame.backB[i] >> 4;
+    const key = (frame.ch[i] * 32768 + packed) * 4096 + back;
     if (key === prev[i]) continue;
     prev[i] = key;
     if (cursor !== i || i % cols === 0) {
       out.push(`\x1b[${Math.floor(i / cols) + 1};${i % cols + 1}H`);
+    }
+    if (back !== backing) {
+      backing = back;
+      const tone = back ? [(frame.backR[i] & 240) + 8, (frame.backG[i] & 240) + 8, (frame.backB[i] & 240) + 8] : BG;
+      out.push(`\x1b[48;2;${tone.join(';')}m`);
     }
     if (packed !== color) {
       color = packed;
@@ -859,27 +878,38 @@ function moonSurface(lat, lon, t, out) {
 
 const STAGES = {
   disk: [16, 11],
-  cluster: [26, 12],
-  hole: [36, 15],
-  binary: [50, 11],
-  pulsar: [60, 11],
-  planetary: [70, 11],
-  nova: [80, 12],
-  comet: [97, 11],
-  eclipse: [135, 9],
+  pillars: [26, 12],
+  cluster: [37, 12],
+  hole: [47, 22],
+  binary: [68, 11],
+  pulsar: [78, 11],
+  planetary: [88, 11],
+  nova: [98, 12],
+  merger: [109, 17],
+  comet: [132, 11],
+  eclipse: [221, 9],
 };
-const WARPS = [6, 25.5, 36, 50, 60, 70, 80];
-const SUN_AT = 91;
-const BELT_AT = 118.5;
+const WARPS = [6, 25.5, 36.5, 47, 68, 78, 88, 98, 109];
+const SUN_AT = 126;
+const BELT_AT = 164.5;
 const BELT_TIME = 6;
-const JOURNEY_END = 160;
+const EARTH_AT = 172;
+const GROUND_AT = EARTH_AT + ENTRY_TIME;
+const CLIMB_AT = GROUND_AT + GROUND_TIME;
+const JOURNEY_END = 246;
+
+const ORBITS = [
+  { at: 52, span: 12, turn: 4.4 },
+  { at: 142, span: 13, turn: 5 },
+];
+const SWINGS = [[25.5, 0.8], [36.5, -0.7], [68, 0.9], [78, -0.8], [88, 0.7], [98, -0.9], [125.5, 0.8]];
 
 const JOURNEY = [
-  { surface: neptuneSurface, at: 91, span: 10, size: 0.42, side: 1, lift: -0.14, tilt: 0.49, spin: 0.14, reach: 1.1, halo: [80, 150, 255], haloWidth: 0.05 },
-  { surface: uranusSurface, at: 97, span: 10, size: 0.4, side: -1, lift: 0.12, tilt: 1.71, spin: 0.1, reach: 1.1, halo: [150, 225, 235], haloWidth: 0.05 },
-  { surface: saturnSurface, at: 103, span: 11, size: 0.36, side: 1, lift: -0.1, tilt: -0.34, spin: 0.2, reach: 2.4, rings: true },
+  { surface: neptuneSurface, at: 126, span: 10, size: 0.42, side: 1, lift: -0.14, tilt: 0.49, spin: 0.14, reach: 1.1, halo: [80, 150, 255], haloWidth: 0.05 },
+  { surface: uranusSurface, at: 132, span: 10, size: 0.4, side: -1, lift: 0.12, tilt: 1.71, spin: 0.1, reach: 1.1, halo: [150, 225, 235], haloWidth: 0.05 },
+  { surface: saturnSurface, at: 138, span: 20, size: 0.36, side: 1, lift: -0.1, tilt: -0.34, spin: 0.2, reach: 2.4, rings: true, open: 0.24, orbit: { from: 0.2, to: 0.85, hold: 0.86, index: 1 } },
   {
-    surface: jupiterSurface, at: 109, span: 11, size: 0.66, side: -1, lift: 0.16, tilt: 0.05, spin: 0.22, reach: 1,
+    surface: jupiterSurface, at: 156, span: 11, size: 0.66, side: -1, lift: 0.16, tilt: 0.05, spin: 0.22, reach: 1,
     moons: [
       { orbit: 1.5, size: 0.05, speed: 1.3, phase: 0.4, tint: [236, 208, 120] },
       { orbit: 1.9, size: 0.045, speed: 0.9, phase: 2.2, tint: [226, 220, 208] },
@@ -887,16 +917,52 @@ const JOURNEY = [
       { orbit: 3.4, size: 0.07, speed: 0.4, phase: 5.3, tint: [120, 108, 98] },
     ],
   },
-  { surface: marsSurface, at: 120, span: 9, size: 0.3, side: 1, lift: 0.14, tilt: 0.44, spin: 0.14, reach: 1 },
-  { surface: earthSurface, night: earthNight, at: 126, span: 11, size: 0.42, side: -1, lift: -0.08, tilt: 0.41, spin: 0.14, reach: 1.1, halo: [110, 180, 255], haloWidth: 0.06 },
-  { surface: venusSurface, at: 142, span: 9, size: 0.38, side: 1, lift: -0.12, tilt: 0.05, spin: 0.05, reach: 1.1, halo: [250, 210, 140], haloWidth: 0.05 },
-  { surface: mercurySurface, at: 147, span: 8.5, size: 0.24, side: -1, lift: 0.1, tilt: 0.03, spin: 0.08, reach: 1 },
+  { surface: marsSurface, at: 165, span: 9, size: 0.3, side: 1, lift: 0.14, tilt: 0.44, spin: 0.14, reach: 1 },
+  { surface: venusSurface, at: 228, span: 9, size: 0.38, side: 1, lift: -0.12, tilt: 0.05, spin: 0.05, reach: 1.1, halo: [250, 210, 140], haloWidth: 0.05 },
+  { surface: mercurySurface, at: 233, span: 8.5, size: 0.24, side: -1, lift: 0.1, tilt: 0.03, spin: 0.08, reach: 1 },
 ];
+const EARTH = { surface: earthSurface, night: earthNight, tilt: 0.41, spin: 0.14, reach: 1.1, halo: [110, 180, 255], haloWidth: 0.06 };
+const EARTH_LIMB = { ...EARTH, reach: 1.04, haloWidth: 0.016 };
 const MOON = { surface: moonSurface, tilt: 0.1, spin: 0.05, reach: 1, ambient: 0.1 };
 
 const flyZ = (n, from = 10) => Math.max(from * (1 - n) * (1 - n), 0.02);
 const driftZ = (n) => Math.max(3.2 * Math.pow(1 - n * n * n, 1.5), 0.02);
 const stageOf = (f, [at, span]) => (f - at) / span;
+
+function orbitAngle(orbit, f) {
+  return orbit.turn * smooth(orbit.at, orbit.at + orbit.span, f);
+}
+
+function heading(f) {
+  let total = 0;
+  for (const orbit of ORBITS) total += orbitAngle(orbit, f);
+  for (const [at, angle] of SWINGS) total += angle * smooth(at - 2, at + 2, f);
+  return total;
+}
+
+function banking(f) {
+  let total = 0;
+  for (const [at, angle] of SWINGS) total += angle * 0.3 * gauss(f - at, 1.7);
+  return total;
+}
+
+function orbitPath(p, from, to, hold, far) {
+  if (p < from) {
+    const n = p / from;
+    return { z: hold * Math.pow(far / hold, (1 - n) * (1 - n)), center: smooth(0.4, 1, n) };
+  }
+  if (p <= to) return { z: hold * (1 - 0.1 * Math.sin((Math.PI * (p - from)) / (to - from))), center: 1 };
+  const n = (p - to) / (1 - to);
+  return { z: Math.max(hold * (1 - n) * (1 - n), 0.02), center: 1 - smooth(0, 0.7, n) };
+}
+
+function cloudIndex(x, y) {
+  let a = x - 2 * Math.floor(x / 2);
+  let b = y - 2 * Math.floor(y / 2);
+  if (a > 1) a = 2 - a;
+  if (b > 1) b = 2 - b;
+  return Math.min(CLOUD_SIZE - 1, Math.floor(b * CLOUD_SIZE)) * CLOUD_SIZE + Math.min(CLOUD_SIZE - 1, Math.floor(a * CLOUD_SIZE));
+}
 
 function roche(x, y) {
   return -0.45 / Math.hypot(x + 0.55, y) - 0.55 / Math.hypot(x - 0.45, y) - 0.5 * (x * x + y * y);
@@ -997,6 +1063,13 @@ function buildSpace(cols, rows) {
     mark: new Uint8Array(n),
     clouds: bakeClouds(),
     lens: bakeLensing(),
+    world: bakeWorld(),
+    waves: bakeWaves(),
+    skyline: new Int16Array(cols),
+    other: createFrame(n),
+    yaw: 0,
+    roll: 0,
+    merger: null,
     fill: 1.2 * Math.hypot(cols / (2 * unit), (rows * CELL) / (2 * unit)),
     swarm: [],
     stars: [],
@@ -1017,8 +1090,10 @@ function buildSpace(cols, rows) {
       const u = (c - cols / 2) / unit;
       const v = ((r - rows / 2) * CELL) / unit;
       const i = r * cols + c;
-      const haze = smooth(0.5, 0.78, fbm(u * 1.1 + 4, v * 1.1 + 9));
-      const tint = noise(u * 0.7 + 1, v * 0.7 + 6);
+      const blend = c / cols;
+      const wrap = u - (2 * cols) / (2 * unit);
+      const haze = mix(smooth(0.5, 0.78, fbm(u * 1.1 + 4, v * 1.1 + 9)), smooth(0.5, 0.78, fbm(wrap * 1.1 + 4, v * 1.1 + 9)), blend);
+      const tint = mix(noise(u * 0.7 + 1, v * 0.7 + 6), noise(wrap * 0.7 + 1, v * 0.7 + 6), blend);
       space.hazeR[i] = haze * mix(34, 10, tint);
       space.hazeG[i] = haze * 10;
       space.hazeB[i] = haze * mix(44, 54, tint);
@@ -1094,14 +1169,36 @@ function plot(space, x, y, r, g, b, mark) {
 
 function flightSpeed(f) {
   if (f < 0) return 0.015;
-  let speed = mix(0.06, 0.24, smooth(88, 92, f)) + 2.2 * gauss(f - 89.5, 1.5) + gauss(f - 154, 4);
+  let speed = mix(0.06, 0.24, smooth(124, 128, f)) + 2.2 * gauss(f - 125.5, 1.5) + gauss(f - 240, 4);
   for (const at of WARPS) speed += 1.8 * gauss(f - at, 1.3);
   return speed;
 }
 
+function turnStar(star, space, pan, twist) {
+  const reach = space.edge + 0.2;
+  const cos = Math.cos(twist);
+  const sin = Math.sin(twist);
+  const x = star.x - pan * star.z;
+  const wasX = star.wasX - pan;
+  star.x = x * cos - star.y * sin;
+  star.y = x * sin + star.y * cos;
+  star.wasX = wasX * cos - star.wasY * sin;
+  star.wasY = wasX * sin + star.wasY * cos;
+  if (Math.abs(star.x) > reach * star.z) {
+    const jump = Math.sign(star.x) * 2 * reach;
+    star.x -= jump * star.z;
+    star.wasX -= jump;
+  }
+}
+
 function drawStars(space, f, dt) {
   const speed = flightSpeed(f);
+  const pan = heading(f) - heading(f - dt);
+  const twist = banking(f) - banking(f - dt);
+  space.yaw += pan;
+  space.roll += twist;
   for (const star of space.stars) {
+    if (pan || twist) turnStar(star, space, pan, twist);
     star.z -= speed * dt * 0.5;
     const x = star.x / Math.max(star.z, 0.01);
     const y = star.y / Math.max(star.z, 0.01);
@@ -1251,12 +1348,13 @@ function drawBlackHole(space, f) {
   if (n <= 0 || n >= 1) return;
   const { cols, rows, unit, red, green, blue, mark, backR, backG, backB, backM } = space;
   const { orbit, sweep, h } = space.lens;
-  const z = driftZ(n);
+  const { z, center } = orbitPath(n, 0.23, 0.78, 0.9, 3.2);
   const scale = 0.06 / z;
-  const cx = -1.15 / z;
-  const cy = -0.1 / z;
+  const cx = mix(-1.15, -0.1, center) / z;
+  const cy = mix(-0.1, -0.02, center) / z;
   const fade = smooth(0, 0.1, n);
-  const incline = mix(1.5, 1.22, n);
+  const circled = orbitAngle(ORBITS[0], f);
+  const incline = 1.5 - 0.62 * Math.sin((circled / ORBITS[0].turn) * Math.PI);
   const cosI = Math.cos(incline);
   const sinI = Math.sin(incline);
   const [left, right, top, bottom] = bounds(space, cx, cy, LENS_REACH * scale);
@@ -1312,7 +1410,7 @@ function drawBlackHole(space, f) {
         const speed = 1 / Math.sqrt(radius - 2);
         const toward = -speed * Math.cos(phi) * sinI;
         const shift = Math.sqrt(1 - 3 / radius) / (1 - toward);
-        const swirl = phi - f * 11 * Math.pow(radius, -1.5);
+        const swirl = phi - circled - f * 11 * Math.pow(radius, -1.5);
         const lane = Math.log(radius) * 3.2;
         const clump = 0.45 + 1.1 * noise(Math.cos(swirl) * 2.6 + lane, Math.sin(swirl) * 2.6 + lane);
         const glow = Math.pow(DISK_IN / radius, 2.2) * Math.sqrt(1 - Math.sqrt(DISK_IN / radius)) * smooth(DISK_OUT, 11, radius);
@@ -1375,6 +1473,61 @@ function drawYoungStar(space, f) {
   }
 }
 
+function drawPillars(space, f) {
+  const n = stageOf(f, STAGES.pillars);
+  if (n <= 0 || n >= 1) return;
+  const { cols, rows, unit, red, green, blue, mark, clouds: tex } = space;
+  const { density } = tex;
+  const fade = smooth(0, 0.14, n) * smooth(1, 0.86, n);
+  const z = mix(1.3, 0.3, n * n);
+  const columns = [
+    { x: -0.82, top: -0.02, tip: 0.07, base: 0.34, depth: 1.8 },
+    { x: 0.92, top: 0.12, tip: 0.06, base: 0.3, depth: 1.45 },
+    { x: 0.08, top: -0.72, tip: 0.1, base: 0.42, depth: 1.15 },
+  ];
+
+  for (let r = 0; r < rows; r++) {
+    const v = ((r - rows / 2) * CELL) / unit;
+    const high = smooth(0.9, -0.9, v);
+    for (let c = 0; c < cols; c++) {
+      const u = (c - cols / 2) / unit;
+      const i = r * cols + c;
+      const gas = density[cloudIndex(u * 0.17 * z + 0.3, v * 0.17 * z + 0.45)];
+      const light = gas * gas * 1.3 * fade;
+      red[i] += light * mix(245, 44, high);
+      green[i] += light * mix(120, 176, high);
+      blue[i] += light * mix(66, 216, high);
+
+      for (const column of columns) {
+        const scale = 1 / (z * column.depth);
+        const fx = u / scale - column.x;
+        const fy = (v - 1.3) / scale + 1.3;
+        if (fy < column.top - 0.1) continue;
+        const t = clamp((fy - column.top) / 1.5);
+        const lump = density[cloudIndex(fx * 0.32 + column.x + 0.5, fy * 0.32 + 0.2)];
+        const width = mix(column.tip, column.base, Math.pow(t, 0.6)) * Math.sqrt(smooth(0, 0.05, t + 0.005));
+        const lean = Math.sin(fy * 2.6 + column.x * 7) * 0.06;
+        const edge = Math.abs(fx + lean) - width * (0.55 + 1.05 * lump);
+        if (edge < 0 && t > 0) {
+          const deep = smooth(0, -0.1, edge);
+          const cap = smooth(0.22, 0, t);
+          const lit = (1 - deep) * (0.55 + 0.75 * lump) + cap * 0.55;
+          const dust = fade * (0.1 + 0.9 * lit);
+          red[i] = mix(red[i], mix(40, 255, lit), fade) * (0.55 + 0.45 * dust);
+          green[i] = mix(green[i], mix(17, 164, lit), fade) * (0.55 + 0.45 * dust);
+          blue[i] = mix(blue[i], mix(12, 108, lit), fade) * (0.55 + 0.45 * dust);
+          mark[i] = 0;
+        } else if (edge >= 0 && edge < 0.2) {
+          const mist = Math.exp(-edge / 0.05) * smooth(0.5, 0, t) * fade * 0.8;
+          red[i] += mist * 90;
+          green[i] += mist * 196;
+          blue[i] += mist * 200;
+        }
+      }
+    }
+  }
+}
+
 function drawCluster(space, f) {
   const n = stageOf(f, STAGES.cluster);
   if (n <= 0 || n >= 1) return;
@@ -1394,6 +1547,155 @@ function drawCluster(space, f) {
     green[i] += star.g * lit * 0.45;
     blue[i] += star.b * lit * 0.45;
     mark[i] = crowded ? 0 : lit > 0.7 ? 42 : lit > 0.42 ? 43 : 46;
+  }
+}
+
+function startMerger() {
+  const m = {
+    time: 0,
+    x: new Float32Array(MERGER_STARS),
+    y: new Float32Array(MERGER_STARS),
+    z: new Float32Array(MERGER_STARS),
+    vx: new Float32Array(MERGER_STARS),
+    vy: new Float32Array(MERGER_STARS),
+    vz: new Float32Array(MERGER_STARS),
+    r: new Float32Array(MERGER_STARS),
+    g: new Float32Array(MERGER_STARS),
+    b: new Float32Array(MERGER_STARS),
+    heavy: [
+      { x: -3.6, y: -1, z: 0, vx: 0.36, vy: 0.14, vz: 0 },
+      { x: 3.6, y: 1, z: 0, vx: -0.36, vy: -0.14, vz: 0 },
+    ],
+  };
+  for (let i = 0; i < MERGER_STARS; i++) {
+    const home = m.heavy[i % 2];
+    const tilt = i % 2 ? 0.7 : 0.2;
+    const radius = 0.25 + Math.sqrt(Math.random()) * 1.7;
+    const angle = rand(0, TAU);
+    const pull = 1 / Math.pow(radius * radius + 0.05, 1.5);
+    const speed = radius * Math.sqrt(pull);
+    const lx = Math.cos(angle) * radius;
+    const ly = Math.sin(angle) * radius;
+    const wx = -Math.sin(angle) * speed;
+    const wy = Math.cos(angle) * speed;
+    m.x[i] = home.x + lx;
+    m.y[i] = home.y + ly * Math.cos(tilt);
+    m.z[i] = ly * Math.sin(tilt);
+    m.vx[i] = home.vx + wx;
+    m.vy[i] = home.vy + wy * Math.cos(tilt);
+    m.vz[i] = wy * Math.sin(tilt);
+    const warm = smooth(0.9, 0.3, radius);
+    const pink = Math.random() < 0.06;
+    m.r[i] = pink ? 255 : mix(140, 255, warm);
+    m.g[i] = pink ? 96 : mix(182, 210, warm);
+    m.b[i] = pink ? 160 : mix(255, 140, warm);
+  }
+  return m;
+}
+
+function stepMerger(m, h) {
+  const [a, b] = m.heavy;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dz = b.z - a.z;
+  const gap = Math.sqrt(dx * dx + dy * dy + dz * dz + 0.05);
+  const force = 1 / (gap * gap * gap);
+  const brake = 0.34 * smooth(2.6, 0.4, gap);
+  a.vx += (dx * force - a.vx * brake) * h;
+  a.vy += (dy * force - a.vy * brake) * h;
+  a.vz += (dz * force - a.vz * brake) * h;
+  b.vx += (-dx * force - b.vx * brake) * h;
+  b.vy += (-dy * force - b.vy * brake) * h;
+  b.vz += (-dz * force - b.vz * brake) * h;
+  for (const body of m.heavy) {
+    body.x += body.vx * h;
+    body.y += body.vy * h;
+    body.z += body.vz * h;
+  }
+  const { x, y, z, vx, vy, vz } = m;
+  for (let i = 0; i < MERGER_STARS; i++) {
+    let ax = 0;
+    let ay = 0;
+    let az = 0;
+    for (const body of m.heavy) {
+      const px = body.x - x[i];
+      const py = body.y - y[i];
+      const pz = body.z - z[i];
+      const d2 = px * px + py * py + pz * pz + 0.05;
+      const pull = 1 / (d2 * Math.sqrt(d2));
+      ax += px * pull;
+      ay += py * pull;
+      az += pz * pull;
+    }
+    vx[i] += ax * h;
+    vy[i] += ay * h;
+    vz[i] += az * h;
+    x[i] += vx[i] * h;
+    y[i] += vy[i] * h;
+    z[i] += vz[i] * h;
+  }
+}
+
+function addGlow(space, x, y, width, r, g, b) {
+  const { cols, rows, unit, red, green, blue } = space;
+  const [left, right, top, bottom] = bounds(space, x, y, width * 5);
+  for (let row = top; row <= bottom; row++) {
+    const dy = ((row - rows / 2) * CELL) / unit - y;
+    for (let col = left; col <= right; col++) {
+      const light = Math.exp(-Math.hypot((col - cols / 2) / unit - x, dy) / width);
+      const i = row * cols + col;
+      red[i] += r * light;
+      green[i] += g * light;
+      blue[i] += b * light;
+    }
+  }
+}
+
+function drawMerger(space, f) {
+  const n = stageOf(f, STAGES.merger);
+  if (n <= 0 || n >= 1) {
+    if (n <= 0) space.merger = null;
+    return;
+  }
+  if (!space.merger) space.merger = startMerger();
+  const m = space.merger;
+  const target = n * 46;
+  for (let k = 0; m.time < target && k < 12; k++) {
+    stepMerger(m, 0.024);
+    m.time += 0.024;
+  }
+
+  const fade = smooth(0, 0.1, n) * smooth(1, 0.9, n);
+  const scale = 0.17 * (1 + n * 0.45);
+  const tiltCos = Math.cos(0.75);
+  const tiltSin = Math.sin(0.75);
+  const lit = (fade * 0.3 * space.n) / MERGER_STARS;
+  for (let i = 0; i < MERGER_STARS; i++) {
+    plot(space, m.x[i] * scale, (m.y[i] * tiltCos - m.z[i] * tiltSin) * scale, m.r[i] * lit, m.g[i] * lit, m.b[i] * lit);
+  }
+
+  const [a, b] = m.heavy;
+  const ax = a.x * scale;
+  const ay = (a.y * tiltCos - a.z * tiltSin) * scale;
+  const bx = b.x * scale;
+  const by = (b.y * tiltCos - b.z * tiltSin) * scale;
+  addGlow(space, ax, ay, 0.05, 255 * fade, 216 * fade, 150 * fade);
+  addGlow(space, bx, by, 0.05, 255 * fade, 216 * fade, 150 * fade);
+
+  const quasar = smooth(0.7, 0.84, n) * fade;
+  if (quasar <= 0) return;
+  const cx = (ax + bx) / 2;
+  const cy = (ay + by) / 2;
+  addGlow(space, cx, cy, 0.08, 420 * quasar, 460 * quasar, 520 * quasar);
+  const lean = -0.52;
+  for (let i = 0; i < 2600; i++) {
+    const side = i % 2 ? 1 : -1;
+    const t = Math.pow(hash(i, 1.7), 0.7);
+    const reach = t * 1.9 * side;
+    const spread = (hash(i, 8.3) - 0.5) * (0.008 + t * 0.09);
+    const knot = 0.6 + 0.8 * Math.pow(0.5 + 0.5 * Math.sin(t * 34 - f * 5), 3);
+    const glow = quasar * (1 - t * 0.8) * knot * 24;
+    plot(space, cx + Math.sin(lean) * reach + Math.cos(lean) * spread, cy - Math.cos(lean) * reach + Math.sin(lean) * spread, glow * 130, glow * 190, glow * 255);
   }
 }
 
@@ -1767,8 +2069,8 @@ function drawMoon(space, f) {
   drawBody(space, MOON, f, moon.x, moon.y, radius, toward * Math.sin(angle), 0, -Math.cos(angle) * 0.25 + 0.15, 1, 0);
 }
 
-function ringAt(x, y) {
-  const r = Math.hypot(x, y / 0.24);
+function ringAt(x, y, open) {
+  const r = Math.hypot(x, y / open);
   if (r < 1.3 || r > 2.3) return 0;
   if (r > 1.84 && r < 1.92) return 0;
   return (0.8 + 0.2 * Math.sin(r * 38)) * smooth(1.3, 1.4, r) * smooth(2.3, 2.15, r);
@@ -1801,7 +2103,7 @@ function drawBody(space, world, f, px, py, radius, lightX, lightY, lightZ, fade,
   const ringColor = [206, 180, 138];
   const flat = Math.hypot(lightX, lightY) + 1e-3;
   const throwLength = (2.6 * flat) / Math.max(lightZ, 0.12);
-  const ambient = world.ambient || 0.03;
+  const ambient = world.ambient || 0.05;
 
   for (let r = top; r <= bottom; r++) {
     const ny = (((r - rows / 2) * CELL) / unit - py) / radius;
@@ -1811,7 +2113,7 @@ function drawBody(space, world, f, px, py, radius, lightX, lightY, lightZ, fade,
       const d = Math.hypot(nx, ny);
       const rx = nx * cos + ny * sin;
       const ry = ny * cos - nx * sin;
-      const ring = world.rings ? ringAt(rx, ry) : 0;
+      const ring = world.rings ? ringAt(rx, ry, world.open) : 0;
 
       if (d < 1 && !(ring > 0 && ry > 0)) {
         const nz = Math.sqrt(1 - d * d);
@@ -1841,15 +2143,27 @@ function drawBody(space, world, f, px, py, radius, lightX, lightY, lightZ, fade,
 function drawWorld(space, world, f) {
   const p = (f - world.at) / world.span;
   if (p <= 0 || p >= 1) return;
-  const z = flyZ(p);
   const side = world.side * (world.size * world.reach * 1.25 + 0.1);
+  const fade = smooth(0, 0.12, p);
+
+  if (world.orbit) {
+    const { from, to, hold, index } = world.orbit;
+    const circle = ORBITS[index];
+    const circled = orbitAngle(circle, f);
+    const { z, center } = orbitPath(p, from, to, hold, 10);
+    const azimuth = circled - 0.6;
+    world.open = 0.24 + 0.22 * Math.sin((circled / circle.turn) * Math.PI);
+    drawBody(space, world, f, mix(side, side * 0.08, center) / z, mix(world.lift, 0.02, center) / z, world.size / z, Math.sin(azimuth) * 0.95, -0.28, Math.cos(azimuth) * 0.95, fade, circled);
+    return;
+  }
+
+  const z = flyZ(p);
   const offset = Math.hypot(side, world.lift);
   const px = side / z;
   const py = world.lift / z;
   const radius = world.size / z;
   const angle = Math.atan2(offset, z);
   const swing = 0.3 + angle * 0.9;
-  const fade = smooth(0, 0.12, p);
   drawBody(space, world, f, px, py, radius, (-side / offset) * Math.sin(swing), (-world.lift / offset) * Math.sin(swing), Math.cos(swing), fade, world.side * angle);
 
   if (!world.moons) return;
@@ -1860,6 +2174,21 @@ function drawWorld(space, world, f) {
     if (Math.sin(around) < 0 && Math.hypot(mx, my) < 1) continue;
     spot(space, px + mx * radius, py + my * radius, Math.max(moon.size * radius, 0.008), moon.tint, fade);
   }
+}
+
+function drawEarthApproach(space, f) {
+  const n = (f - EARTH_AT) / ENTRY_TIME;
+  if (n <= 0 || n >= 1) return;
+  const radius = 0.03 * Math.exp(Math.pow(n, 1.4) * Math.log(300));
+  drawBody(space, EARTH, f, 0, radius * 0.86 * smooth(0.35, 1, n), radius, -0.55, -0.3, 0.78, smooth(0, 0.1, n), 0);
+}
+
+function drawEarthDeparture(space, f) {
+  const n = (f - CLIMB_AT) / CLIMB_TIME;
+  if (n < 0 || n >= 1) return;
+  const radius = mix(7, 1.2, Math.pow(n, 0.7));
+  const limb = mix(-0.5, space.fill + 0.2, n * n);
+  drawBody(space, EARTH_LIMB, f, 0, limb + radius, radius, 0, -0.66, -0.75, 1, 0);
 }
 
 function drawBelt(space, f, dt) {
@@ -1893,25 +2222,52 @@ function drawBelt(space, f, dt) {
   }
 }
 
-function drawSpace(space, view, t, f, dt, frame) {
-  space.red.set(space.hazeR);
-  space.green.set(space.hazeG);
-  space.blue.set(space.hazeB);
+function layHaze(space) {
+  const { cols, rows, n, unit, red, green, blue, hazeR, hazeG, hazeB } = space;
+  if (!space.yaw && !space.roll) {
+    red.set(hazeR);
+    green.set(hazeG);
+    blue.set(hazeB);
+    return;
+  }
+  const shift = space.yaw * unit;
+  const cos = Math.cos(space.roll);
+  const sin = Math.sin(space.roll);
+  for (let i = 0; i < n; i++) {
+    const c = i % cols;
+    const r = (i - c) / cols;
+    const u = c - cols / 2;
+    const v = (r - rows / 2) * CELL;
+    const col = Math.round(u * cos + v * sin + shift + cols / 2);
+    const row = Math.round((v * cos - u * sin) / CELL + rows / 2);
+    const from = clamp(row, 0, rows - 1) * cols + (((col % cols) + cols) % cols);
+    red[i] = hazeR[from];
+    green[i] = hazeG[from];
+    blue[i] = hazeB[from];
+  }
+}
+
+function drawCosmos(space, view, t, f, dt) {
+  layHaze(space);
   space.mark.fill(0);
 
   drawNebula(space, f);
   drawGalaxy(space, view, t, f);
   drawStars(space, f, dt);
+  drawPillars(space, f);
   drawCluster(space, f);
   drawYoungStar(space, f);
   drawBinary(space, f);
   drawPulsar(space, f);
   drawPlanetary(space, f);
   drawSupernova(space, f);
+  drawMerger(space, f);
   drawBlackHole(space, f);
   drawComet(space, f);
   drawSolar(space, view, f);
   for (let w = JOURNEY.length - 1; w >= 0; w--) drawWorld(space, JOURNEY[w], f);
+  drawEarthApproach(space, f);
+  drawEarthDeparture(space, f);
   drawMoon(space, f);
   drawBelt(space, f, dt);
 
@@ -1922,7 +2278,29 @@ function drawSpace(space, view, t, f, dt, frame) {
       space.blue[i] += 130 * view.veil;
     }
   }
+}
 
+function drawVeil(space, amount, t) {
+  const { cols, rows, unit, red, green, blue, mark, clouds: tex } = space;
+  const { density } = tex;
+  for (let r = 0; r < rows; r++) {
+    const v = ((r - rows / 2) * CELL) / unit;
+    for (let c = 0; c < cols; c++) {
+      const u = (c - cols / 2) / unit;
+      const puff = (density[cloudIndex(u * 0.2 + 0.3 + t * 0.03, v * 0.2 + 0.4 - t * 0.09)] + density[cloudIndex(u * 0.5 + 0.1 - t * 0.05, v * 0.5 + 0.7 - t * 0.2)]) / 2;
+      const cover = clamp((puff - 1 + amount * 1.5) * 3.2);
+      if (cover <= 0) continue;
+      const i = r * cols + c;
+      const light = 196 + puff * 60;
+      red[i] = mix(red[i], light, cover);
+      green[i] = mix(green[i], light * 1.01, cover);
+      blue[i] = mix(blue[i], light * 1.04, cover);
+      mark[i] = 0;
+    }
+  }
+}
+
+function resolve(space, frame, solid = 0) {
   for (let i = 0; i < space.n; i++) {
     const r = space.red[i];
     const g = space.green[i];
@@ -1931,15 +2309,639 @@ function drawSpace(space, view, t, f, dt, frame) {
     if (peak < 16) {
       frame.ch[i] = 32;
       frame.r[i] = frame.g[i] = frame.b[i] = 0;
+      frame.backR[i] = frame.backG[i] = frame.backB[i] = 0;
       continue;
     }
     const v = 1 - Math.exp(-peak / 150);
     const gain = (v * 255) / peak;
     const light = 1 - Math.exp(-(0.3 * r + 0.45 * g + 0.25 * b) / 110);
+    const lift = 1 + 0.32 * solid;
     frame.ch[i] = space.mark[i] || RAMP.charCodeAt(Math.round(clamp(Math.pow(light, 1.2) + space.speck[i]) * (RAMP.length - 1)));
-    frame.r[i] = Math.min(255, r * gain);
-    frame.g[i] = Math.min(255, g * gain);
-    frame.b[i] = Math.min(255, b * gain);
+    frame.r[i] = Math.min(255, r * gain * lift);
+    frame.g[i] = Math.min(255, g * gain * lift);
+    frame.b[i] = Math.min(255, b * gain * lift);
+    frame.backR[i] = Math.min(255, r * gain * 0.66 * solid);
+    frame.backG[i] = Math.min(255, g * gain * 0.66 * solid);
+    frame.backB[i] = Math.min(255, b * gain * 0.66 * solid);
+  }
+}
+
+function dissolve(frame, other, k) {
+  for (let i = 0; i < frame.ch.length; i++) {
+    frame.r[i] = mix(frame.r[i], other.r[i], k);
+    frame.g[i] = mix(frame.g[i], other.g[i], k);
+    frame.b[i] = mix(frame.b[i], other.b[i], k);
+    frame.backR[i] = mix(frame.backR[i], other.backR[i], k);
+    frame.backG[i] = mix(frame.backG[i], other.backG[i], k);
+    frame.backB[i] = mix(frame.backB[i], other.backB[i], k);
+    if (hash(i, 2.9) < k) frame.ch[i] = other.ch[i];
+  }
+}
+
+function trackX(z) {
+  return 512 + 70 * Math.sin(z * 0.0065) + 30 * Math.sin(z * 0.017 + 1);
+}
+
+function cityAt(x, z) {
+  const old = gauss(Math.hypot(x - 560, z - 640), 220);
+  const metro = 1.05 * gauss(Math.hypot(x - 470, z - 1790), 320);
+  const sprawl = 0.5 * smooth(1530, 1600, z) * smooth(0.35, 0.6, noise(x * 0.012 + 7, z * 0.012));
+  return clamp(Math.max(old, metro, sprawl));
+}
+
+let world = null;
+
+function bakeWorld() {
+  if (world) return world;
+  const n = WORLD_W * WORLD_L;
+  const ground = new Float32Array(n);
+  const cities = new Float32Array(n);
+  const towers = new Uint8Array(n);
+  const lamps = new Uint8Array(n);
+  const kind = new Uint8Array(n);
+  const seed = new Uint8Array(n);
+  const tintR = new Uint8Array(n);
+  const tintG = new Uint8Array(n);
+  const tintB = new Uint8Array(n);
+  const shade = new Float32Array(n);
+  const shore = new Float32Array(WORLD_W);
+  for (let i = 0; i < WORLD_W; i++) shore[i] = (fbm(i * WORLD_STEP * 0.004 + 3, 1.7) - 0.5) * 170;
+
+  for (let j = 0; j < WORLD_L; j++) {
+    const z = j * WORLD_STEP;
+    const path = trackX(z);
+    const bend = 36 * Math.sin(z * 0.01);
+    const range = smooth(480, 240, z);
+    for (let i = 0; i < WORLD_W; i++) {
+      const x = i * WORLD_STEP;
+      const at = z + shore[i];
+      const sea = smooth(790, 850, at) * smooth(1500, 1440, at);
+      let h = 6 + 16 * fbm(x * 0.012 + 5, z * 0.012 + 9);
+      if (range > 0) {
+        const ridge = 1 - Math.abs(2 * fbm(x * 0.0055 + 1, z * 0.0055 + 2) - 1);
+        const away = Math.abs(x - path);
+        h += range * ((Math.pow(ridge, 1.8) * 250 + 90 * smooth(70, 200, away)) * mix(0.3, 1, smooth(40, 130, away)) + (noise(x * 0.045, z * 0.045) - 0.5) * 34 + (noise(x * 0.11 + 4, z * 0.11) - 0.5) * 14);
+      }
+      const river = Math.abs(x - path - bend);
+      if (river < 30) h = mix(-3, h, smooth(12, 30, river));
+      const city = cityAt(x, z) * (1 - smooth(0, 0.03, sea)) * smooth(30, 46, river);
+      h = mix(h, 4, smooth(0.08, 0.35, city));
+      const idx = j * WORLD_W + i;
+      ground[idx] = mix(h, -16, sea);
+      cities[idx] = city;
+    }
+  }
+
+  const heightAt = (i, j) => ground[clamp(j, 0, WORLD_L - 1) * WORLD_W + ((i + WORLD_W) % WORLD_W)];
+
+  for (let j = 0; j < WORLD_L; j++) {
+    for (let i = 0; i < WORLD_W; i++) {
+      const idx = j * WORLD_W + i;
+      const h = ground[idx];
+      if (h <= 0) {
+        kind[idx] = 1;
+        tintR[idx] = 176;
+        tintG[idx] = 156;
+        tintB[idx] = 118;
+        continue;
+      }
+      const x = i * WORLD_STEP;
+      const z = j * WORLD_STEP;
+      const slope = Math.hypot(heightAt(i + 1, j) - heightAt(i - 1, j), heightAt(i, j + 1) - heightAt(i, j - 1)) / (2 * WORLD_STEP);
+      const wild = fbm(x * 0.02 + 11, z * 0.02 + 3);
+      const patch = hash(Math.floor(x / 44), Math.floor(z / 32));
+      let r = mix(24, 60, wild);
+      let g = mix(58, 104, wild);
+      let b = mix(30, 52, wild);
+      const farm = smooth(0.54, 0.44, wild) * smooth(300, 420, z);
+      if (farm > 0) {
+        const field = patch < 0.34 ? [170, 158, 78] : patch < 0.68 ? [96, 136, 62] : [140, 110, 70];
+        r = mix(r, field[0], farm);
+        g = mix(g, field[1], farm);
+        b = mix(b, field[2], farm);
+      }
+      const rock = Math.max(smooth(0.5, 0.95, slope), smooth(70, 110, h));
+      r = mix(r, 116, rock);
+      g = mix(g, 106, rock);
+      b = mix(b, 98, rock);
+      const snow = smooth(105, 150, h + (wild - 0.5) * 60) * smooth(1.2, 0.6, slope);
+      r = mix(r, 244, snow);
+      g = mix(g, 248, snow);
+      b = mix(b, 252, snow);
+      const sand = smooth(7, 3, h) * smooth(600, 700, z);
+      r = mix(r, 214, sand);
+      g = mix(g, 192, sand);
+      b = mix(b, 146, sand);
+
+      const city = cities[idx];
+      if (city > 0.06) {
+        const cellI = i % 16;
+        const cellJ = j % 16;
+        const blockI = Math.floor(i / 16);
+        const blockJ = Math.floor(j / 16);
+        const avenue = (blockI % 5 === 0 && cellI < 3) || (blockJ % 4 === 0 && cellJ < 3);
+        if (cellI < 3 || cellJ < 3) {
+          kind[idx] = avenue ? 4 : 2;
+          r = g = 66;
+          b = 72;
+          lamps[idx] = (hash(Math.floor(i / 3), Math.floor(j / 3)) > 0.35 ? 255 : 90) * mix(0.35, 1, city);
+        } else if (hash(blockI, blockJ) < 0.06) {
+          r = 58;
+          g = 112;
+          b = 56;
+        } else {
+          const lotI = cellI > 9 ? 1 : 0;
+          const lotJ = cellJ > 9 ? 1 : 0;
+          const lot = hash(blockI * 2 + lotI + 0.5, blockJ * 2 + lotJ + 0.5);
+          if (lot < city * 1.8 && cellI !== 9 && cellJ !== 9) {
+            const tall = hash(lot * 91, 3.3);
+            const clear = mix(0.5, 1, smooth(30, 90, Math.abs(x - trackX(z))));
+            towers[idx] = Math.min(120, (5 + Math.pow(tall, 3) * (14 + 100 * city * city)) * clear);
+            kind[idx] = 3;
+            seed[idx] = lot * 255;
+            const paint = hash(lot * 37, 8.1);
+            r = paint < 0.4 ? 150 : paint < 0.7 ? 104 : 196;
+            g = paint < 0.4 ? 150 : paint < 0.7 ? 134 : 178;
+            b = paint < 0.4 ? 156 : paint < 0.7 ? 164 : 150;
+          } else {
+            r = 96;
+            g = 94;
+            b = 88;
+            lamps[idx] = 50 * city;
+          }
+        }
+      }
+      tintR[idx] = r;
+      tintG[idx] = g;
+      tintB[idx] = b;
+    }
+  }
+
+  const reach = Math.hypot(-0.5, 0.62, -0.5);
+  const sunX = -0.5 / reach;
+  const sunY = 0.62 / reach;
+  const sunZ = -0.5 / reach;
+  const topAt = (i, j) => {
+    const wrapped = (i + WORLD_W) % WORLD_W;
+    const row = clamp(j, 0, WORLD_L - 1);
+    const idx = row * WORLD_W + wrapped;
+    return Math.max(ground[idx], 0) + towers[idx];
+  };
+  for (let j = 0; j < WORLD_L; j++) {
+    for (let i = 0; i < WORLD_W; i++) {
+      const top = topAt(i, j);
+      const dx = (topAt(i + 1, j) - topAt(i - 1, j)) / (2 * WORLD_STEP);
+      const dz = (topAt(i, j + 1) - topAt(i, j - 1)) / (2 * WORLD_STEP);
+      let light = clamp((-dx * sunX + sunY - dz * sunZ) / Math.sqrt(1 + dx * dx + dz * dz));
+      for (let s = 1; s <= 8; s++) {
+        if (topAt(i - Math.round(s * 2.8), j - Math.round(s * 2.8)) > top + s * 8 * 0.9) {
+          light *= 0.35;
+          break;
+        }
+      }
+      shade[j * WORLD_W + i] = light;
+    }
+  }
+
+  const blurW = WORLD_W >> 3;
+  const blurL = WORLD_L >> 3;
+  let blur = new Float32Array(blurW * blurL);
+  for (let j = 0; j < WORLD_L; j++) {
+    for (let i = 0; i < WORLD_W; i++) {
+      const idx = j * WORLD_W + i;
+      blur[(j >> 3) * blurW + (i >> 3)] += (lamps[idx] + towers[idx] * 3) / (64 * 255);
+    }
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    const next = new Float32Array(blurW * blurL);
+    for (let j = 0; j < blurL; j++) {
+      for (let i = 0; i < blurW; i++) {
+        let sum = 0;
+        for (let dj = -2; dj <= 2; dj++) {
+          for (let di = -2; di <= 2; di++) {
+            sum += blur[clamp(j + dj, 0, blurL - 1) * blurW + clamp(i + di, 0, blurW - 1)];
+          }
+        }
+        next[j * blurW + i] = sum / 25;
+      }
+    }
+    blur = next;
+  }
+
+  world = { ground, towers, lamps, kind, seed, tintR, tintG, tintB, shade, blur, blurW };
+  return world;
+}
+
+let waves = null;
+
+function bakeWaves() {
+  if (waves) return waves;
+  const swell = [[3, 2, 1, 0.4], [-2, 5, 0.7, 2.1], [5, 3, 0.5, 4.4], [-7, 4, 0.34, 1.3], [4, 9, 0.28, 5.2], [11, -6, 0.2, 3.1], [-13, 9, 0.14, 0.7], [17, 12, 0.1, 2.6]];
+  const height = new Float32Array(WAVE_SIZE * WAVE_SIZE);
+  const slopeX = new Float32Array(WAVE_SIZE * WAVE_SIZE);
+  const slopeZ = new Float32Array(WAVE_SIZE * WAVE_SIZE);
+  for (let j = 0; j < WAVE_SIZE; j++) {
+    for (let i = 0; i < WAVE_SIZE; i++) {
+      let h = 0;
+      for (const [kx, kz, amp, phase] of swell) {
+        const s = Math.sin(((kx * i + kz * j) / WAVE_SIZE) * TAU + phase) * 0.5 + 0.5;
+        h += amp * (Math.pow(s, 2.2) * 2 - 0.7);
+      }
+      height[j * WAVE_SIZE + i] = h * 0.5;
+    }
+  }
+  const mask = WAVE_SIZE - 1;
+  for (let j = 0; j < WAVE_SIZE; j++) {
+    for (let i = 0; i < WAVE_SIZE; i++) {
+      slopeX[j * WAVE_SIZE + i] = (height[j * WAVE_SIZE + ((i + 1) & mask)] - height[j * WAVE_SIZE + ((i - 1) & mask)]) / 2;
+      slopeZ[j * WAVE_SIZE + i] = (height[((j + 1) & mask) * WAVE_SIZE + i] - height[((j - 1) & mask) * WAVE_SIZE + i]) / 2;
+    }
+  }
+  waves = { height, slopeX, slopeZ };
+  return waves;
+}
+
+const FLIGHT = [
+  [-3, -80, 170, 0.1],
+  [0, 40, 150, 0.08],
+  [5, 300, 132, 0.1],
+  [9, 480, 92, 0.2],
+  [13, 680, 74, 0.2],
+  [16, 860, 56, 0.12],
+  [18.3, 1000, 14, 0.05],
+  [20, 1100, 4.2, 0.02],
+  [26, 1370, 4.2, 0.02],
+  [28.5, 1490, 30, 0.06],
+  [32, 1670, 100, 0.18],
+  [36, 1860, 300, 0.3],
+  [38, 1950, 420, 0.32],
+  [41, 2040, 460, 0.34],
+];
+const SUN_PATH = [[0, 0.7], [12, 0.55], [18, 0.16], [24, 0.05], [27.5, -0.02], [30, -0.16], [33, -0.4], [40, -0.5]];
+const BANKS = [[0, 0.08], [7, -0.2], [12.5, 0.18], [17, 0], [22, 0.1], [25, -0.08], [30, 0.22], [35, 0], [40, 0]];
+
+function catmull(a, b, c, d, t) {
+  return b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
+}
+
+function flightAt(e) {
+  let k = 1;
+  while (k < FLIGHT.length - 3 && e > FLIGHT[k + 1][0]) k++;
+  const t = clamp((e - FLIGHT[k][0]) / (FLIGHT[k + 1][0] - FLIGHT[k][0]));
+  const value = (slot) => catmull(FLIGHT[k - 1][slot], FLIGHT[k][slot], FLIGHT[k + 1][slot], FLIGHT[k + 2][slot], t);
+  return { z: value(1), alt: Math.max(value(2), 3.4), tilt: value(3) };
+}
+
+function keyed(keys, e) {
+  let k = 0;
+  while (k < keys.length - 2 && e > keys[k + 1][0]) k++;
+  return mix(keys[k][1], keys[k + 1][1], smooth(keys[k][0], keys[k + 1][0], e));
+}
+
+function drawGround(space, e) {
+  const { cols, rows, red, green, blue, mark, skyline, clouds: tex } = space;
+  const { ground, towers, lamps, kind, seed, tintR, tintG, tintB, shade, blur, blurW } = space.world;
+  const { height, slopeX, slopeZ } = space.waves;
+  const { density } = tex;
+  mark.fill(0);
+
+  const { z: camZ, alt, tilt } = flightAt(e);
+  const camX = trackX(camZ);
+  const lean = (trackX(camZ + 6) - trackX(camZ - 6)) / 12;
+  const yaw = Math.atan(lean);
+  const sway = (trackX(camZ + 12) - 2 * trackX(camZ) + trackX(camZ - 12)) / 144;
+  const bank = sway * 26 + keyed(BANKS, e);
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+
+  const sunEl = keyed(SUN_PATH, e);
+  const day = smooth(-0.12, 0.3, sunEl);
+  const dusk = gauss(sunEl - 0.02, 0.14);
+  const dark = smooth(0, -0.22, sunEl);
+  const sunAz = mix(2.4, -0.42, smooth(8, 19, e));
+  const sunPx = Math.cos(sunAz - yaw) > 0.1 ? Math.tan(sunAz - yaw) : 99;
+  const sunTan = Math.tan(sunEl);
+  const sunX = Math.sin(sunAz) * Math.cos(sunEl);
+  const sunY = Math.sin(sunEl);
+  const sunZ = Math.cos(sunAz) * Math.cos(sunEl);
+
+  const topR = mix(3, 16, day) + 40 * dusk;
+  const topG = mix(4, 52, day) + 20 * dusk;
+  const topB = mix(14, 148, day) + 62 * dusk;
+  const lowR = mix(mix(7, 128, day), 226, dusk);
+  const lowG = mix(mix(10, 160, day), 118, dusk);
+  const lowB = mix(mix(26, 200, day), 92, dusk);
+  const glow = Math.max(day, dusk * 0.8);
+  const beamR = 255 * glow;
+  const beamG = mix(246, 150, dusk) * glow;
+  const beamB = mix(230, 70, dusk) * glow;
+  const skyR = mix(12, 44, day);
+  const skyG = mix(16, 58, day);
+  const skyB = mix(36, 84, day);
+
+  const focal = cols * 0.62;
+  const stretch = focal / CELL;
+  const center = cols / 2;
+  const slope = Math.tan(bank) / CELL;
+  const horizon = rows * (0.4 - tilt) + Math.sin(e * 0.9) * 0.4;
+  const sag = ((alt / 420) * 5 * dark) / (center * center);
+  const fogRate = 1 / 1700;
+  const far = 680 + alt * 1.6;
+  const start = Math.max(0.6, alt * 0.012);
+  const skim = smooth(18.2, 19.4, e) * smooth(26.4, 25.2, e);
+  const mask = WAVE_SIZE - 1;
+  const swellX = -e * 3;
+  const swellZ = e * 7;
+  const chopX = e * 4;
+  const chopZ = e * 9;
+
+  for (let c = 0; c < cols; c++) {
+    const px = (c - center) / focal;
+    const dirX = sinYaw + px * cosYaw;
+    const dirZ = cosYaw - px * sinYaw;
+    const dc = c - center;
+    const hz = horizon + slope * dc + sag * dc * dc;
+    const toSun = px - sunPx;
+    const flare = dusk * Math.exp(-toSun * toSun * 1.6);
+    const fogR = lowR + (255 - lowR) * flare;
+    const fogG = lowG + (176 - lowG) * flare;
+    const fogB = lowB + (92 - lowB) * flare;
+    let bottom = rows;
+    let dz = start;
+    let previous = -99;
+
+    for (let z = start * 3; z < far; z += dz, dz *= 1.0135) {
+      const wx = camX + dirX * z;
+      const wz = camZ + dirZ * z;
+      const fi = wx / WORLD_STEP;
+      const fj = wz / WORLD_STEP;
+      const i = ((Math.floor(fi) % WORLD_W) + WORLD_W) % WORLD_W;
+      const j = fj < 0 ? 0 : fj >= WORLD_L ? WORLD_L - 1 : Math.floor(fj);
+      const idx = j * WORLD_W + i;
+      let land = ground[idx];
+      if (z < 110 && j + 1 < WORLD_L && i + 1 < WORLD_W) {
+        const a = fi - Math.floor(fi);
+        const b = fj - j;
+        land = mix(mix(land, ground[idx + 1], a), mix(ground[idx + WORLD_W], ground[idx + WORLD_W + 1], a), b);
+      }
+
+      const water = land <= 0;
+      let top = water ? 0 : land + towers[idx];
+      let foam = 0;
+      let a0 = 0;
+      let a1 = 0;
+      if (water) {
+        const damp = z < 70 ? 1 : 70 / z;
+        a0 = (((Math.floor(wz * 0.5 + swellZ) & mask) << 8) | (Math.floor(wx * 0.5 + swellX) & mask));
+        a1 = (((Math.floor(wz * 1.9 + chopZ) & mask) << 8) | (Math.floor(wx * 1.9 + chopX) & mask));
+        const swell = height[a0];
+        const chop = height[a1];
+        top = (swell * 1.5 + chop * 0.42) * damp;
+        foam = smooth(0.8, 1.6, swell * 1.5 + chop * 0.6) * 0.8 * (z < 160 ? 1 : 0.4);
+        if (land > -4) {
+          const surf = 0.5 + 0.5 * Math.sin(land * 2.6 + e * 2.2);
+          foam = Math.max(foam, smooth(0.6, 0.92, surf) * smooth(-4, -1, land));
+        }
+        if (skim > 0 && z < 22) {
+          const side = Math.abs(px * z);
+          const behind = 15 - z;
+          const ridge = behind > 0 ? gauss(side - behind * 0.354, 0.22 + behind * 0.04) * smooth(0, 2, behind) : 0;
+          const bow = gauss(z - 15, 1.1) * gauss(side, 0.8);
+          foam = Math.max(foam, (ridge + bow) * skim);
+          top += ridge * 0.5 * skim;
+        }
+      }
+
+      const row = hz + ((alt - top) / z) * stretch;
+      if (row < bottom) {
+        const first = row < 0 ? 0 : Math.floor(row);
+        const haze = Math.max(1 - Math.exp(-z * fogRate), smooth(far * 0.64, far * 0.98, z));
+        const glowCell = blur[(j >> 3) * blurW + (i >> 3)];
+        let lr;
+        let lg;
+        let lb;
+        let shineR = 0;
+        let shineG = 0;
+        let shineB = 0;
+        const type = kind[idx];
+        const face = type === 3 && top - previous > 1.5;
+
+        if (water) {
+          const sx = slopeX[a0] * 1.5 + slopeX[a1] * 1.5;
+          const sz = slopeZ[a0] * 1.5 + slopeZ[a1] * 1.5;
+          const drop = -(alt - top) / z;
+          const length = Math.sqrt(dirX * dirX + dirZ * dirZ + drop * drop);
+          const vx = dirX / length;
+          const vy = drop / length;
+          const vz = dirZ / length;
+          const scale = 1 / Math.sqrt(1 + sx * sx + sz * sz);
+          const nx = -sx * scale;
+          const nz = -sz * scale;
+          const facing = vx * nx + vy * scale + vz * nz;
+          const rx = vx - 2 * facing * nx;
+          const ry = Math.abs(vy - 2 * facing * scale);
+          const rz = vz - 2 * facing * nz;
+          const fresnel = 0.03 + 0.97 * Math.pow(1 - clamp(-facing), 5);
+          const rise = 1 - Math.exp(-ry * 3.2);
+          const body = 0.16 + 0.7 * day + 0.3 * dusk;
+          const lean = clamp(nx * sunX + nz * sunZ + scale * sunY + 0.18);
+          lr = mix((10 + 20 * lean) * body, mix(fogR, topR, rise), fresnel);
+          lg = mix((64 + 120 * lean) * body, mix(fogG, topG, rise), fresnel);
+          lb = mix((92 + 120 * lean) * body, mix(fogB, topB, rise), fresnel);
+          lr += lean * beamR * 0.5 * dusk;
+          lg += lean * beamG * 0.5 * dusk;
+          lb += lean * beamB * 0.5 * dusk;
+          const glitter = Math.pow(clamp(rx * sunX + ry * Math.abs(sunY) + rz * sunZ), 60) * smooth(-0.08, 0.02, sunEl);
+          lr += glitter * 760;
+          lg += glitter * mix(720, 400, dusk);
+          lb += glitter * mix(640, 170, dusk);
+          const foamLight = 40 + 200 * day;
+          lr = mix(lr, foamLight * mix(1, 1.05, dusk), foam);
+          lg = mix(lg, foamLight * mix(1, 0.8, dusk), foam);
+          lb = mix(lb, foamLight * mix(1.02, 0.66, dusk), foam);
+          shineR = glowCell * dark * 1100 * (0.3 + fresnel);
+          shineG = glowCell * dark * 660 * (0.3 + fresnel);
+          shineB = glowCell * dark * 260 * (0.3 + fresnel);
+        } else {
+          const sun = face ? 0.5 + (seed[idx] / 255) * 0.42 : shade[idx];
+          const near = z < 160 ? (noise(wx * 0.3, wz * 0.3) - 0.5) * 0.3 : 0;
+          const direct = sun * (1.2 - 0.85 * dusk);
+          lr = (tintR[idx] / 255) * (skyR + beamR * direct) * (1 + near);
+          lg = (tintG[idx] / 255) * (skyG + beamG * direct) * (1 + near);
+          lb = (tintB[idx] / 255) * (skyB + beamB * direct) * (1 + near);
+          if (dark > 0.02) {
+            const lit = (lamps[idx] / 255) * dark;
+            const carpet = Math.min(glowCell * 1.5, 0.45) * dark * (face ? 0.35 : 1);
+            shineR = lit * 330 + carpet * 210;
+            shineG = lit * 214 + carpet * 118;
+            shineB = lit * 116 + carpet * 52;
+            if (type === 4) {
+              const lane = Math.floor((wx + wz) / 3) & 1;
+              const car = hash(Math.floor(wz / 4 + (lane ? e * 7 : -e * 7)), Math.floor(wx / 12));
+              if (car > 0.66) {
+                shineR += dark * 360;
+                shineG += dark * (lane ? 340 : 40);
+                shineB += dark * (lane ? 300 : 30);
+              }
+            }
+          }
+        }
+
+        lr = mix(lr, fogR, haze);
+        lg = mix(lg, fogG, haze);
+        lb = mix(lb, fogB, haze);
+        const reach = Math.exp(-z / 1500);
+        shineR *= reach;
+        shineG *= reach;
+        shineB *= reach;
+
+        for (let r = first; r < bottom && r < rows; r++) {
+          const cell = r * cols + c;
+          let wr = lr + shineR;
+          let wg = lg + shineG;
+          let wb = lb + shineB;
+          if (type === 3 && face) {
+            const level = Math.floor((alt - ((r - hz) * z) / stretch) / 3);
+            const span = Math.floor((wx + wz) / 2.4);
+            const glass = hash(level + seed[idx] * 0.13, span);
+            const pane = (level & 1) === 0 ? 0.82 : 1.08;
+            wr *= pane;
+            wg *= pane;
+            wb *= pane;
+            if (glass > mix(0.98, 0.55, dark) && (level & 1) === 0) {
+              const warm = hash(span, level);
+              wr += 300 * dark * reach + 20 * day;
+              wg += (warm > 0.3 ? 210 : 240) * dark * reach + 20 * day;
+              wb += (warm > 0.3 ? 110 : 250) * dark * reach + 26 * day;
+            }
+          }
+          red[cell] = wr;
+          green[cell] = wg;
+          blue[cell] = wb;
+        }
+        bottom = first;
+        if (bottom <= 0) break;
+      }
+      previous = top;
+    }
+
+    skyline[c] = bottom;
+    for (let r = 0; r < bottom; r++) {
+      const rise = ((hz - r) * CELL) / focal;
+      const up = rise > 0 ? rise : 0;
+      const mixTop = 1 - Math.exp(-up * 3.2);
+      let lr = mix(fogR, topR, mixTop);
+      let lg = mix(fogG, topG, mixTop);
+      let lb = mix(fogB, topB, mixTop);
+
+      if (up > 0.012) {
+        const depth = 0.1 / (up + 0.035);
+        const cloud = density[cloudIndex(px * depth * 0.8 + camX * 0.00016 + e * 0.0016, depth * 0.45 + camZ * 0.00026)];
+        const cover = smooth(0.56, 0.9, cloud) * smooth(0.012, 0.09, up) * 0.8;
+        const shadeR = mix(mix(12, 244, day), 255, dusk);
+        const shadeG = mix(mix(14, 246, day), 130, dusk);
+        const shadeB = mix(mix(26, 252, day), 104, dusk);
+        lr = mix(lr, shadeR, cover);
+        lg = mix(lg, shadeG, cover);
+        lb = mix(lb, shadeB, cover);
+      }
+
+      const off = Math.hypot(toSun, rise - sunTan);
+      if (sunEl > -0.05 && off < 1.2) {
+        const halo = Math.exp(-off / (0.08 + dusk * 0.1)) * 1.1 + Math.exp(-off / 0.35) * 0.3 * (0.4 + dusk);
+        lr += 255 * halo;
+        lg += mix(236, 150, dusk) * halo;
+        lb += mix(200, 70, dusk) * halo;
+        if (off < 0.024) {
+          lr = 400;
+          lg = 340;
+          lb = mix(280, 150, dusk);
+        }
+      }
+
+      if (dark > 0.05) {
+        const dot = hash(c * 0.73 + Math.round(px * 3), r * 0.57 + 4.1);
+        if (dot > 0.986) {
+          const twinkle = 0.55 + 0.45 * Math.sin(e * 4 + dot * 90);
+          const star = dark * smooth(0.01, 0.14, up) * twinkle * 240;
+          lr += star;
+          lg += star;
+          lb += star * 1.08;
+          if (star > 30) mark[r * cols + c] = star > 130 ? 42 : 46;
+        }
+        const curtain = gauss(up - 0.3 - noise(px * 2 + e * 0.1, 3.3) * 0.2, 0.15) * (0.4 + 0.9 * noise(px * 16 + e * 0.5, 6.1)) * smooth(0.3, 0.8, dark) * smooth(28, 34, e);
+        lr += curtain * 22;
+        lg += curtain * 190;
+        lb += curtain * 96;
+      }
+
+      const cell = r * cols + c;
+      red[cell] = lr;
+      green[cell] = lg;
+      blue[cell] = lb;
+    }
+  }
+
+  if (skim > 0) {
+    for (let k = 0; k < 90; k++) {
+      const life = (e * 1.5 + hash(k, 1.7)) % 1;
+      const side = k % 2 ? 1 : -1;
+      const z = 15 - life * 9;
+      const flung = (15 - z) * 0.36 + life * hash(k, 3.1) * 1.2;
+      const rise = Math.sin(Math.PI * life) * (0.5 + hash(k, 4.9) * 1.6);
+      const col = Math.round(center + (side * flung * focal) / z);
+      const row = Math.round(horizon + slope * side * (flung / z) * focal + ((alt - rise) / z) * stretch);
+      if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+      const cell = row * cols + col;
+      const glow = skim * (1 - life) * (40 + 210 * day);
+      red[cell] += glow;
+      green[cell] += glow;
+      blue[cell] += glow;
+      mark[cell] = 46;
+    }
+  }
+
+  if (dark > 0.3) {
+    for (let k = 0; k < 4; k++) {
+      const age = (e - 27 - k * 2.3) / 0.8;
+      if (age < 0 || age > 1) continue;
+      const fromC = cols * (0.2 + hash(k, 5.5) * 0.6);
+      const fromR = rows * (0.05 + hash(k, 6.5) * 0.2);
+      for (let s = 0; s < 14; s++) {
+        const t = age - s * 0.018;
+        if (t < 0) continue;
+        const col = Math.round(fromC + t * cols * 0.26);
+        const row = Math.round(fromR + t * rows * 0.16);
+        if (col < 0 || col >= cols || row < 0 || row >= rows || row >= skyline[col]) continue;
+        const cell = row * cols + col;
+        const glow = 300 * (1 - s / 14) * smooth(1, 0.8, age);
+        red[cell] += glow;
+        green[cell] += glow * 0.95;
+        blue[cell] += glow * 0.86;
+        mark[cell] = 92;
+      }
+    }
+  }
+}
+
+function drawSpace(space, view, t, f, dt, frame) {
+  const low = f - GROUND_AT;
+  if (low >= 0 && low < GROUND_TIME) {
+    drawGround(space, low);
+    if (low < 1.8) drawVeil(space, smooth(1.8, 0, low), f);
+    resolve(space, frame, 1);
+    return;
+  }
+
+  drawCosmos(space, view, t, f, dt);
+  const entering = f > GROUND_AT - 1.4 && low < 0 ? smooth(-1.4, 0, low) : 0;
+  if (entering > 0) drawVeil(space, entering, f);
+  resolve(space, frame, entering);
+
+  if (low >= GROUND_TIME && low < GROUND_TIME + DISSOLVE) {
+    drawGround(space, low);
+    resolve(space, space.other, 1);
+    dissolve(frame, space.other, smooth(DISSOLVE, 0, low - GROUND_TIME));
   }
 }
 
@@ -1948,6 +2950,9 @@ function fadeFrame(frame, k) {
     frame.r[i] *= k;
     frame.g[i] *= k;
     frame.b[i] *= k;
+    frame.backR[i] *= k;
+    frame.backG[i] *= k;
+    frame.backB[i] *= k;
     if (k < 0.08) frame.ch[i] = 32;
   }
 }
@@ -2091,4 +3096,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { ZOOM_AT, ZOOM_TIME, GALAXY_HOLD, JOURNEY, JOURNEY_END, OUTRO_TIME, STAGES, buildScene, buildSpace, createFrame, createShow, playShow, encodeFrame };
+module.exports = { ZOOM_AT, ZOOM_TIME, GALAXY_HOLD, JOURNEY, JOURNEY_END, OUTRO_TIME, STAGES, EARTH_AT, GROUND_AT, CLIMB_AT, buildScene, buildSpace, createFrame, createShow, playShow, encodeFrame };
