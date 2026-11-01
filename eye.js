@@ -11,7 +11,8 @@ const STAGE_FONT = 9;
 const INTRO_TIME = 7.4;
 const TEAR_SPILL = 2.9;
 const TEAR_END = 14;
-const CREDITS_TIME = 76;
+const CREDITS_TIME = 84;
+const HALF_BLOCK = 128;
 const CRAWL_AT = 9;
 const CRAWL_WIDTH = 26;
 const TAU = Math.PI * 2;
@@ -781,7 +782,8 @@ function encodeFrame(scene, frame, prev) {
   let backing = -1;
   for (let i = 0; i < n; i++) {
     const back = (frame.backR[i] >> 4) << 8 | (frame.backG[i] >> 4) << 4 | frame.backB[i] >> 4;
-    const fine = back ? 224 : 248;
+    const half = frame.ch[i] === HALF_BLOCK;
+    const fine = half ? 240 : back ? 224 : 248;
     const packed = ((frame.r[i] & fine) >> 3) << 10 | ((frame.g[i] & fine) >> 3) << 5 | (frame.b[i] & fine) >> 3;
     const key = (frame.ch[i] * 32768 + packed) * 4096 + back;
     if (key === prev[i]) continue;
@@ -798,7 +800,7 @@ function encodeFrame(scene, frame, prev) {
       color = packed;
       out.push(`\x1b[38;2;${frame.r[i] & fine};${frame.g[i] & fine};${frame.b[i] & fine}m`);
     }
-    out.push(String.fromCharCode(frame.ch[i]));
+    out.push(half ? '\u2580' : String.fromCharCode(frame.ch[i]));
     cursor = i + 1;
   }
   out.push('\x1b[?2026l');
@@ -4507,17 +4509,19 @@ const CREDITS = [
   'votre terminal.',
 ];
 
-function buildCrawl(cols, rows) {
-  const lines = CREDITS.map(plainCaps);
-  const width = CRAWL_WIDTH * 6;
-  const height = lines.length * 11;
+function buildTextMap(lines, leading) {
+  const width = Math.max(...lines.map((line) => line.length)) * 7;
+  const height = lines.length * leading;
   const base = new Float32Array(width * height);
   lines.forEach((line, row) => {
-    const left = Math.floor((width - line.length * 6) / 2);
+    const left = Math.floor((width - line.length * 7) / 2);
     for (let k = 0; k < line.length; k++) {
       for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 5; x++) {
-          if (fontDot(line.charCodeAt(k), x, y)) base[(row * 11 + y) * width + left + k * 6 + x] = 1;
+          if (!fontDot(line.charCodeAt(k), x, y)) continue;
+          const at = (row * leading + y) * width + left + k * 7 + x;
+          base[at] = 1;
+          base[at + 1] = 1;
         }
       }
     }
@@ -4536,12 +4540,28 @@ function buildCrawl(cols, rows) {
     }
     levels.push({ map: next, w: nextW, h: nextH });
   }
+  return { levels, width, height };
+}
 
-  const horizon = rows * 0.08;
-  const depth = rows - horizon;
-  const scale = (cols * 0.9) / width;
-  const stretch = (depth * CELL) / scale / 1.5;
-  return { lines, width, height, levels, horizon, depth, scale, stretch, flat: scale < 1.1, total: height + stretch * 2.1 + 30 };
+function buildCrawl(cols, rows) {
+  const lines = CREDITS.map(plainCaps);
+  const text = buildTextMap(lines, 12);
+  const tall = rows * 2;
+  const horizon = tall * 0.06;
+  const depth = tall - horizon;
+  const scale = (cols * 0.92) / text.width;
+  const stretch = depth / scale / 1.5;
+  const size = cols * tall;
+  return {
+    lines, text, tall, horizon, depth, scale, stretch,
+    hello: buildTextMap(['IL Y A BIEN LONGTEMPS,', 'DANS UN TERMINAL LOINTAIN,', 'TRES LOINTAIN....'], 15),
+    logo: buildTextMap(['GALAXY'], 8),
+    red: new Uint8ClampedArray(size),
+    green: new Uint8ClampedArray(size),
+    blue: new Uint8ClampedArray(size),
+    flat: scale < 0.8,
+    total: text.height + stretch * 2.6 + 30,
+  };
 }
 
 function sampleText({ map, w, h }, x, y) {
@@ -4554,50 +4574,55 @@ function sampleText({ map, w, h }, x, y) {
   return mix(mix(map[i], map[i + 1], fx), mix(map[i + w], map[i + w + 1], fx), fy);
 }
 
-function drawLogo(space, age, life) {
-  const { cols, rows, red, green, blue } = space;
-  const word = 'GALAXY';
-  const size = ((cols * 1.3) / (word.length * 6)) * Math.exp(-age * 0.58);
-  const fade = smooth(0, 0.3, age) * smooth(life, life - 1.8, age);
-  for (let r = 0; r < rows; r++) {
-    const v = ((r - rows / 2) * CELL) / size + 3.5;
-    if (v < 0 || v >= 7) continue;
-    for (let c = 0; c < cols; c++) {
-      const u = (c - cols / 2) / size + (word.length * 6 - 1) / 2;
-      if (u < 0 || u >= word.length * 6) continue;
-      const slot = Math.floor(u / 6);
-      if (!fontDot(word.charCodeAt(slot), Math.floor(u - slot * 6), Math.floor(v))) continue;
-      const i = r * cols + c;
-      red[i] += 120 * fade;
-      green[i] += 330 * fade;
-      blue[i] += 760 * fade;
+function pickLevel(levels, step) {
+  return Math.min(levels.length - 1, Math.max(0, Math.round(Math.log2(Math.max(step, 1)))));
+}
+
+function stampText(crawl, cols, map, size, fade, r, g, b) {
+  const { tall, red, green, blue } = crawl;
+  const { levels, width, height } = map;
+  const level = pickLevel(levels, 1 / size);
+  const shrink = 1 << level;
+  const left = Math.max(0, Math.floor(cols / 2 - (width * size) / 2));
+  const right = Math.min(cols - 1, Math.ceil(cols / 2 + (width * size) / 2));
+  const top = Math.max(0, Math.floor(tall / 2 - (height * size) / 2));
+  const bottom = Math.min(tall - 1, Math.ceil(tall / 2 + (height * size) / 2));
+  for (let py = top; py <= bottom; py++) {
+    const v = (py - tall / 2) / size + height / 2;
+    for (let c = left; c <= right; c++) {
+      const ink = sampleText(levels[level], ((c - cols / 2) / size + width / 2) / shrink, v / shrink);
+      if (ink < 0.05) continue;
+      const lit = smooth(0.2, 0.7, ink) * fade;
+      const i = py * cols + c;
+      crawl.red[i] += r * lit;
+      crawl.green[i] += g * lit;
+      crawl.blue[i] += b * lit;
     }
   }
 }
 
-function drawCrawl(space, t) {
-  const { cols, rows, red, green, blue, crawl } = space;
-  const { width, levels, horizon, depth, scale, stretch } = crawl;
+function drawCrawl(crawl, cols, t) {
+  const { text, tall, horizon, depth, scale, stretch } = crawl;
+  const { levels, width, height } = text;
   const p = (t - CRAWL_AT) / (CREDITS_TIME - CRAWL_AT);
-  const scroll = p * crawl.total - 22;
-  for (let r = Math.ceil(horizon) + 1; r < rows; r++) {
-    const y = (r - horizon) / depth;
+  const scroll = p * crawl.total - 26;
+  for (let py = Math.ceil(horizon) + 1; py < tall; py++) {
+    const y = (py - horizon) / depth;
     const line = scroll - stretch * (1 / y - 1);
-    if (line < -12 || line > crawl.height) continue;
+    if (line < -14 || line > height) continue;
     const across = 1 / (scale * y);
-    const down = (stretch / depth) / (y * y);
-    const level = Math.min(3, Math.max(0, Math.floor(Math.log2(Math.max(across, down)))));
+    const down = stretch / depth / (y * y);
+    const level = pickLevel(levels, Math.max(across, down));
     const shrink = 1 << level;
-    const fade = smooth(0.1, 0.42, y);
+    const fade = smooth(0.1, 0.3, y);
     for (let c = 0; c < cols; c++) {
-      const u = (c - cols / 2) * across + width / 2;
-      const ink = sampleText(levels[level], u / shrink, line / shrink);
-      if (ink < 0.2) continue;
-      const i = r * cols + c;
-      const lit = smooth(0.22, 0.5, ink) * fade;
-      red[i] += 120 * lit;
-      green[i] += 330 * lit;
-      blue[i] += 760 * lit;
+      const ink = sampleText(levels[level], ((c - cols / 2) * across + width / 2) / shrink, line / shrink);
+      if (ink < 0.05) continue;
+      const lit = smooth(0.14, 0.62, ink) * fade;
+      const i = py * cols + c;
+      crawl.red[i] += 112 * lit;
+      crawl.green[i] += 182 * lit;
+      crawl.blue[i] += 255 * lit;
     }
   }
 }
@@ -4619,34 +4644,62 @@ function writeLine(space, frame, row, text, r, g, b) {
 }
 
 function drawCredits(space, t, frame) {
-  const { rows, red, green, blue, mark, crawl } = space;
+  const { cols, rows, n, crawl } = space;
+  const { red, green, blue, tall } = crawl;
   red.fill(0);
   green.fill(0);
   blue.fill(0);
-  mark.fill(0);
+
   const fade = smooth(0, 1.5, t) * smooth(CREDITS_TIME, CREDITS_TIME - 3, t);
-  twinkle(space, fade, t);
-  if (t > 5.2 && t < 12.2) drawLogo(space, t - 5.2, 7);
-  if (t > CRAWL_AT && !crawl.flat) drawCrawl(space, t);
-  resolve(space, frame, 1);
-  for (let i = 0; i < space.n; i++) {
-    if (mark[i]) frame.backR[i] = frame.backG[i] = frame.backB[i] = 0;
+  const stars = Math.floor((cols * tall) / 320);
+  for (let k = 0; k < stars; k++) {
+    const i = Math.floor(hash(k, 1.3) * cols * tall);
+    const lit = (0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(t * (1 + hash(k, 2.2) * 2.4) + k), 2)) * (60 + 170 * hash(k, 3.7));
+    red[i] = lit * 0.9;
+    green[i] = lit * 0.94;
+    blue[i] = lit;
   }
 
   const hello = smooth(0.6, 1.6, t) * smooth(5, 4, t);
-  if (hello > 0.02) {
-    const mid = Math.floor(rows / 2);
-    writeLine(space, frame, mid - 1, 'Il y a bien longtemps, dans un terminal lointain,', 70 * hello, 190 * hello, 220 * hello);
-    writeLine(space, frame, mid + 1, 'très lointain....', 70 * hello, 190 * hello, 220 * hello);
+  const logoAge = t - 5.2;
+  if (!crawl.flat) {
+    if (hello > 0) stampText(crawl, cols, crawl.hello, Math.min((cols * 0.8) / crawl.hello.width, (tall * 0.5) / crawl.hello.height), hello, 92, 176, 236);
+    if (t > CRAWL_AT) drawCrawl(crawl, cols, t);
   }
-  if (crawl.flat && t > CRAWL_AT) {
-    const p = (t - CRAWL_AT) / (CREDITS_TIME - CRAWL_AT);
-    const top = rows - p * (rows + crawl.lines.length * 2);
-    crawl.lines.forEach((line, k) => {
-      const row = Math.round(top + k * 2);
-      const lit = fade * smooth(0, rows * 0.3, row);
-      writeLine(space, frame, row, line, 96 * lit, 176 * lit, 255 * lit);
-    });
+  if (logoAge > 0 && logoAge < 7) {
+    const lit = smooth(0, 0.3, logoAge) * smooth(7, 5.2, logoAge);
+    stampText(crawl, cols, crawl.logo, ((cols * 1.15) / crawl.logo.width) * Math.exp(-logoAge * 0.58), lit, 112, 182, 255);
+  }
+
+  for (let i = 0; i < n; i++) {
+    const c = i % cols;
+    const top = ((i - c) / cols) * 2 * cols + c;
+    const low = top + cols;
+    const on = red[top] + green[top] + blue[top] + red[low] + green[low] + blue[low] > 6;
+    frame.ch[i] = on ? HALF_BLOCK : 32;
+    frame.r[i] = red[top] * fade;
+    frame.g[i] = green[top] * fade;
+    frame.b[i] = blue[top] * fade;
+    frame.backR[i] = red[low] * fade;
+    frame.backG[i] = green[low] * fade;
+    frame.backB[i] = blue[low] * fade;
+  }
+
+  if (crawl.flat) {
+    if (hello > 0.02) {
+      const mid = Math.floor(rows / 2);
+      writeLine(space, frame, mid - 1, 'Il y a bien longtemps, dans un terminal lointain,', 70 * hello, 190 * hello, 220 * hello);
+      writeLine(space, frame, mid + 1, 'très lointain....', 70 * hello, 190 * hello, 220 * hello);
+    }
+    if (t > CRAWL_AT) {
+      const p = (t - CRAWL_AT) / (CREDITS_TIME - CRAWL_AT);
+      const start = rows - p * (rows + crawl.lines.length * 2);
+      crawl.lines.forEach((line, k) => {
+        const row = Math.round(start + k * 2);
+        const lit = fade * smooth(0, rows * 0.3, row);
+        writeLine(space, frame, row, line, 96 * lit, 176 * lit, 255 * lit);
+      });
+    }
   }
 }
 
