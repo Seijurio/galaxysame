@@ -2,6 +2,7 @@
 
 const { execFileSync } = require('child_process');
 const { readFileSync } = require('fs');
+const { Worker, isMainThread, parentPort } = require('worker_threads');
 
 const RAMP = " .'`^,:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
 const CELL = 2.05;
@@ -9,9 +10,10 @@ const FPS = 30;
 const BG = [0, 0, 0];
 const STAGE_FONT = 9;
 const INTRO_TIME = 7.4;
+const TITLE_HOLD = 4.4;
 const TEAR_SPILL = 2.9;
 const TEAR_END = 14;
-const CREDITS_TIME = 84;
+const CREDITS_TIME = 90;
 const HALF_BLOCK = 128;
 const CRAWL_AT = 9;
 const CRAWL_WIDTH = 26;
@@ -730,7 +732,7 @@ function drawFrame(scene, eye, frame) {
     irisY: BALL * Math.sin(pitch),
   };
 
-  if (eye.zoom > 1) aim(scene, eye.zoom, look.irisX, look.irisY);
+  if (eye.zoom > 1) aim(scene, eye.zoom, eye.target ? eye.target.x : look.irisX, eye.target ? eye.target.y : look.irisY);
 
   for (let c = 0; c < cols; c++) {
     const h = arch[c];
@@ -1083,22 +1085,36 @@ function bakeClouds() {
   return clouds;
 }
 
-function buildSpace(cols, rows) {
+function buildCanvas(cols, rows) {
   const n = cols * rows;
   const unit = Math.min(cols, rows * CELL) / 2;
-  const count = Math.min(60000, n * 3);
-  const space = {
+  const canvas = {
     cols, rows, n, unit,
     edge: cols / (2 * unit),
     red: new Float32Array(n),
     green: new Float32Array(n),
     blue: new Float32Array(n),
     speck: new Float32Array(n),
+    mark: new Uint8Array(n),
+  };
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      canvas.speck[r * cols + c] = (hash(c * 0.61, r * 0.43) - 0.5) * 0.14;
+    }
+  }
+  return canvas;
+}
+
+function buildSpace(cols, rows) {
+  const n = cols * rows;
+  const unit = Math.min(cols, rows * CELL) / 2;
+  const count = Math.min(60000, n * 3);
+  const space = {
+    ...buildCanvas(cols, rows),
     backR: new Float32Array(n),
     backG: new Float32Array(n),
     backB: new Float32Array(n),
     backM: new Uint8Array(n),
-    mark: new Uint8Array(n),
     clouds: bakeClouds(),
     lens: bakeLensing(),
     crawl: buildCrawl(cols, rows),
@@ -1123,13 +1139,6 @@ function buildSpace(cols, rows) {
     tintG: new Float32Array(count),
     tintB: new Float32Array(count),
   };
-
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const i = r * cols + c;
-      space.speck[i] = (hash(c * 0.61, r * 0.43) - 0.5) * 0.14;
-    }
-  }
 
   const starCount = Math.min(900, Math.round(n / 22));
   for (let i = 0; i < starCount; i++) {
@@ -2579,7 +2588,7 @@ function karstAt(x, z) {
 
 let world = null;
 
-function bakeWorld() {
+function bakeWorld(report = () => {}) {
   if (world) return world;
   const n = WORLD_W * WORLD_L;
   const ground = new Float32Array(n);
@@ -2665,6 +2674,7 @@ function bakeWorld() {
     }
   }
 
+  report(0.55);
   const heightAt = (i, j) => ground[clamp(j, 0, WORLD_L - 1) * WORLD_W + ((i + WORLD_W) % WORLD_W)];
 
   for (let j = 0; j < WORLD_L; j++) {
@@ -2891,6 +2901,7 @@ function bakeWorld() {
     }
   }
 
+  report(0.75);
   const reach = Math.hypot(-0.78, 0.52, -0.2);
   const sunX = -0.78 / reach;
   const sunY = 0.52 / reach;
@@ -4207,14 +4218,25 @@ function tearRun(run) {
   return 0.03 * (run + 0.56 * Math.sin(1.6 * run)) + 0.001 * run * run;
 }
 
-function drawTear(scene, eye, frame) {
-  const { cols, rows, low, X, Y } = scene;
+function tearSpot(scene, eye) {
   const t = eye.tear;
   const fade = smooth(TEAR_END, TEAR_END - 1.6, t);
   const fromX = 0.7;
-  const lidCol = clamp(Math.round(fromX * scene.size + scene.cx), 0, cols - 1);
-  const lid = low[lidCol];
+  const lidCol = clamp(Math.round(fromX * scene.size + scene.cx), 0, scene.cols - 1);
+  const lid = scene.low[lidCol];
   const pathX = (y) => fromX + 0.05 * Math.sin((y - lid) * 4.2) + 0.09 * (y - lid) * (y - lid);
+  const run = Math.max(t - TEAR_SPILL, 0);
+  const pace = run > 0 ? 0.5 * (1 + 0.9 * Math.cos(1.6 * run)) : 0;
+  const swell = smooth(0.9, TEAR_SPILL, t) * mix(1, 0.72, smooth(0, 9, run)) * fade;
+  const radius = 0.066 * swell * (1 + 0.16 * (1 - pace));
+  const stretch = 1.25 + 1.5 * pace;
+  const head = lid + 0.05 + radius * stretch + tearRun(run);
+  return { t, fade, fromX, lid, pathX, run, radius, stretch, head, x: pathX(head), y: head };
+}
+
+function drawTear(scene, eye, frame) {
+  const { cols, rows, low, X, Y } = scene;
+  const { t, fade, fromX, lid, pathX, run, radius, stretch, head } = tearSpot(scene, eye);
   const glaze = (x, y, k, ch) => {
     const col = Math.round(x * scene.size + scene.cx);
     const row = Math.round((y * scene.size) / CELL + scene.cy);
@@ -4244,13 +4266,6 @@ function drawTear(scene, eye, frame) {
       if (shimmer > 0.8) frame.ch[i] = 126;
     }
   }
-
-  const run = Math.max(t - TEAR_SPILL, 0);
-  const pace = run > 0 ? 0.5 * (1 + 0.9 * Math.cos(1.6 * run)) : 0;
-  const swell = smooth(0.9, TEAR_SPILL, t) * mix(1, 0.72, smooth(0, 9, run)) * fade;
-  const radius = 0.066 * swell * (1 + 0.16 * (1 - pace));
-  const stretch = 1.25 + 1.5 * pace;
-  const head = lid + 0.05 + radius * stretch + tearRun(run);
 
   for (let y = lid; y < head; y += 0.008) {
     const age = (head - y) * 3;
@@ -4305,12 +4320,12 @@ function twinkle(space, sky, t) {
   }
 }
 
-function buildIntro(cols, rows) {
+function buildIntro(cols, rows, cell = CELL) {
   const gap = 0.32;
   const units = [...TITLE].reduce((sum, letter) => sum + TITLE_GLYPHS[letter].w + gap, -gap);
-  const height = Math.min((cols * 0.82) / units, rows * CELL * 0.38);
+  const height = Math.min((cols * 0.82) / units, rows * cell * 0.38);
   const left = (cols - units * height) / 2;
-  const top = (rows * CELL - height) / 2 + height * 0.14;
+  const top = (rows * cell - height) / 2 + height * 0.14;
   const thick = Math.max(0.105 * height, 1);
   const segments = [];
   let pen = left;
@@ -4329,7 +4344,8 @@ function buildIntro(cols, rows) {
     cols, rows, n,
     left,
     width: units * height,
-    row: Math.round((top - height * 0.36) / CELL),
+    row: Math.round((top - height * 0.36) / cell),
+    barRow: Math.round((top + height * 1.2) / cell),
     mask: new Float32Array(n),
     crest: new Float32Array(n),
     halo: new Float32Array(n),
@@ -4337,9 +4353,9 @@ function buildIntro(cols, rows) {
     dots: [],
   };
   const reach = height * 0.5;
-  const unit = Math.min(cols, rows * CELL) / 2;
+  const unit = Math.min(cols, rows * cell) / 2;
   for (let r = 0; r < rows; r++) {
-    const py = r * CELL;
+    const py = r * cell;
     if (py < top - reach || py > top + height + reach) continue;
     for (let c = 0; c < cols; c++) {
       if (c < left - reach || c > left + units * height + reach) continue;
@@ -4358,14 +4374,27 @@ function buildIntro(cols, rows) {
       intro.halo[i] = Math.exp(-d / (height * 0.13));
       intro.birth[i] = 0.7 + (1.5 * (c - left)) / (units * height) + 0.42 * hash(c * 0.31, r * 0.77);
       if (intro.mask[i] > 0.5) {
-        intro.dots.push({ x: (c - cols / 2) / unit, y: ((r - rows / 2) * CELL) / unit, leave: 5 + 0.9 * hash(c * 0.13, r * 0.51) });
+        intro.dots.push({ x: (c - cols / 2) / unit, y: ((r - rows / 2) * cell) / unit, leave: 5 + 0.9 * hash(c * 0.13, r * 0.51) });
       }
     }
   }
   return intro;
 }
 
-function drawIntro(intro, space, t, frame) {
+const INTRO_LOOK = {
+  sky: twinkle,
+  halo: [0.3, 0.62, 1.3],
+  low: [30, 104, 238],
+  high: [176, 226, 255],
+  flash: [240, 240, 240],
+  sweep: [240, 210, 140],
+  dots: null,
+  line: [196, 210, 232],
+  bar: [96, 176, 255],
+  barOff: [18, 34, 58],
+};
+
+function drawIntro(intro, space, t, frame, load = null, look = INTRO_LOOK) {
   const { cols, rows, n, left, width, mask, crest, halo, birth } = intro;
   const { red, green, blue, mark } = space;
   red.fill(0);
@@ -4373,7 +4402,7 @@ function drawIntro(intro, space, t, frame) {
   blue.fill(0);
   mark.fill(0);
 
-  twinkle(space, smooth(0, 0.9, t) * smooth(6.9, 5.7, t), t);
+  look.sky(space, smooth(0, 0.9, t) * smooth(6.9, 5.7, t), t);
 
   const breath = 0.86 + 0.14 * Math.sin(t * 2);
   const sweepAt = ((t - 2.7) / 1.8) * 1.5 - 0.25;
@@ -4382,9 +4411,9 @@ function drawIntro(intro, space, t, frame) {
     const c = i % cols;
     const on = smooth(birth[i], birth[i] + 0.36, t);
     const glow = 62 * halo[i] * smooth(1.2, 2.6, t) * smooth(5.8, 4.9, t) * breath;
-    red[i] += glow * 0.3;
-    green[i] += glow * 0.62;
-    blue[i] += glow * 1.3;
+    red[i] += glow * look.halo[0];
+    green[i] += glow * look.halo[1];
+    blue[i] += glow * look.halo[2];
     if (mask[i] <= 0) continue;
     const leave = 5 + 0.9 * hash(c * 0.13, (i - c) / cols * 0.51);
     const lit = mask[i] * on * smooth(leave + 0.12, leave, t);
@@ -4392,16 +4421,18 @@ function drawIntro(intro, space, t, frame) {
     const flash = gauss(t - birth[i] - 0.2, 0.16);
     const sweep = gauss((c - left) / width - sweepAt, 0.075);
     const edge = crest[i];
-    const r = mix(30, 176, edge * edge) + flash * 240 + sweep * 240;
-    const g = mix(104, 226, edge) + flash * 240 + sweep * 210;
-    const b = mix(238, 255, edge) + flash * 240 + sweep * 140;
+    const r = mix(look.low[0], look.high[0], edge * edge) + flash * look.flash[0] + sweep * look.sweep[0];
+    const g = mix(look.low[1], look.high[1], edge) + flash * look.flash[1] + sweep * look.sweep[1];
+    const b = mix(look.low[2], look.high[2], edge) + flash * look.flash[2] + sweep * look.sweep[2];
     red[i] += r * lit;
     green[i] += g * lit;
     blue[i] += b * lit;
   }
 
   const aim = (0.05 * rows * CELL) / space.unit;
-  if (t > 5) {
+  if (look.dots) {
+    look.dots(intro, space, t);
+  } else if (t > 5) {
     const every = Math.max(1, Math.floor(intro.dots.length / 6000));
     for (let k = 0; k < intro.dots.length; k += every) {
       const dot = intro.dots[k];
@@ -4432,9 +4463,25 @@ function drawIntro(intro, space, t, frame) {
       if (r < 0 || r >= rows || c < 0 || c >= cols || line[k] === ' ') continue;
       const i = r * cols + c;
       frame.ch[i] = line.charCodeAt(k);
-      frame.r[i] = 196 * fade;
-      frame.g[i] = 210 * fade;
-      frame.b[i] = 232 * fade;
+      frame.r[i] = look.line[0] * fade;
+      frame.g[i] = look.line[1] * fade;
+      frame.b[i] = look.line[2] * fade;
+      frame.backR[i] = frame.backG[i] = frame.backB[i] = 0;
+    }
+  }
+
+  const barFade = load ? load.alpha * smooth(1.5, 2.3, t) : 0;
+  if (barFade > 0.02 && intro.barRow < rows) {
+    const from = Math.round(left);
+    const span = Math.round(width);
+    for (let k = 0; k < span; k++) {
+      const i = intro.barRow * cols + from + k;
+      const filled = k / span < load.value;
+      frame.ch[i] = HALF_BLOCK;
+      const tone = filled ? look.bar : look.barOff;
+      frame.r[i] = tone[0] * barFade;
+      frame.g[i] = tone[1] * barFade;
+      frame.b[i] = tone[2] * barFade;
       frame.backR[i] = frame.backG[i] = frame.backB[i] = 0;
     }
   }
@@ -4457,57 +4504,59 @@ function fontDot(code, x, y) {
   return (parseInt(glyph.slice(x * 2, x * 2 + 2), 16) >> y) & 1;
 }
 
-const SOURCE_LINES = readFileSync(__filename, 'utf8').split('\n').length.toLocaleString('fr-FR').replace(/\s/g, ' ');
+const SOURCE_LINES = readFileSync(__filename, 'utf8').split('\n').length.toLocaleString('en-US');
 
 const CREDITS = [
   'EPISODE I',
-  'UN UNIVERS EN CARACTERES',
+  'A UNIVERSE MADE OF TEXT',
   '',
-  'Concu et realise par',
+  'Created and directed by',
   'SEIJURIO',
   '',
-  'Aucune image.',
-  'Aucune video.',
-  'Rien que du texte :',
-  'chaque planete est',
-  'calculee en direct, dans',
-  'votre terminal.',
+  'No images.',
+  'No video.',
+  'Nothing but text:',
+  'every planet is computed',
+  'live, inside your',
+  'terminal.',
   '',
-  'LE MOTEUR',
-  'JavaScript et Node.js',
-  'Zero dependance',
-  'Un seul fichier',
-  `${SOURCE_LINES} lignes de code`,
+  'THE ENGINE',
+  'JavaScript and Node.js',
+  'Zero dependencies',
+  'A single file',
+  `${SOURCE_LINES} lines of code`,
+  'Worker Threads for',
+  'background loading',
   '',
-  "L'AFFICHAGE",
-  'Caracteres ASCII',
-  'Couleurs 24 bits',
-  '30 images par seconde',
-  'AppleScript pour le',
-  'plein ecran',
+  'THE DISPLAY',
+  'ASCII characters',
+  'Half blocks for this text',
+  '24-bit color',
+  '30 frames per second',
+  'AppleScript for',
+  'full screen',
   '',
-  'LA PHYSIQUE',
-  'Relativite generale',
-  'pour le trou noir',
-  'Orbites par Runge-Kutta',
-  'Gravite simulee pour',
-  'la collision',
-  'Potentiel de Roche pour',
-  'les etoiles doubles',
+  'THE PHYSICS',
+  'General relativity',
+  'for the black hole',
+  'Runge-Kutta orbits',
+  'Simulated gravity for',
+  'the collision',
+  'Roche potential for',
+  'the binary stars',
   '',
-  'LES DECORS',
-  'Bruit fractal',
-  'Lancer de rayons',
-  'Reflets de Fresnel',
-  'Vol en Catmull-Rom',
+  'THE WORLDS',
+  'Fractal noise',
+  'Ray casting',
+  'Fresnel reflections',
+  'Catmull-Rom flight paths',
   '',
-  'Villes et paysages',
-  'sont inventes.',
-  "Aucune etoile n'a ete",
-  'blessee.',
+  'Cities and landscapes',
+  'are imagined.',
+  'No stars were harmed.',
   '',
-  'Que la Force soit avec',
-  'votre terminal.',
+  'May the Force be with',
+  'your terminal.',
 ];
 
 function buildTextMap(lines, leading) {
@@ -4544,8 +4593,10 @@ function buildTextMap(lines, leading) {
   return { levels, width, height };
 }
 
-function buildCrawl(cols, rows) {
-  const lines = CREDITS.map(plainCaps);
+const GREETING = ['A long time ago', 'in a terminal far,', 'far away....'];
+
+function buildCrawl(cols, rows, credits = CREDITS, greeting = GREETING, title = 'GALAXY') {
+  const lines = credits.map(plainCaps);
   const text = buildTextMap(lines, 12);
   const tall = rows * 2;
   const horizon = tall * 0.06;
@@ -4555,8 +4606,9 @@ function buildCrawl(cols, rows) {
   const size = cols * tall;
   return {
     lines, text, tall, horizon, depth, scale, stretch,
-    hello: buildTextMap(['IL Y A BIEN LONGTEMPS,', 'DANS UN TERMINAL LOINTAIN,', 'TRES LOINTAIN....'], 15),
-    logo: buildTextMap(['GALAXY'], 8),
+    greeting,
+    hello: buildTextMap(greeting.map(plainCaps), 15),
+    logo: buildTextMap([plainCaps(title)], 8),
     red: new Uint8ClampedArray(size),
     green: new Uint8ClampedArray(size),
     blue: new Uint8ClampedArray(size),
@@ -4602,7 +4654,7 @@ function stampText(crawl, cols, map, size, fade, r, g, b) {
   }
 }
 
-function drawCrawl(crawl, cols, t) {
+function drawCrawl(crawl, cols, t, ink) {
   const { text, tall, horizon, depth, scale, stretch } = crawl;
   const { levels, width, height } = text;
   const p = (t - CRAWL_AT) / (CREDITS_TIME - CRAWL_AT);
@@ -4617,13 +4669,13 @@ function drawCrawl(crawl, cols, t) {
     const shrink = 1 << level;
     const fade = smooth(0.1, 0.3, y);
     for (let c = 0; c < cols; c++) {
-      const ink = sampleText(levels[level], ((c - cols / 2) * across + width / 2) / shrink, line / shrink);
-      if (ink < 0.05) continue;
-      const lit = smooth(0.14, 0.62, ink) * fade;
+      const dot = sampleText(levels[level], ((c - cols / 2) * across + width / 2) / shrink, line / shrink);
+      if (dot < 0.05) continue;
+      const lit = smooth(0.14, 0.62, dot) * fade;
       const i = py * cols + c;
-      crawl.red[i] += 112 * lit;
-      crawl.green[i] += 182 * lit;
-      crawl.blue[i] += 255 * lit;
+      crawl.red[i] += ink[0] * lit;
+      crawl.green[i] += ink[1] * lit;
+      crawl.blue[i] += ink[2] * lit;
     }
   }
 }
@@ -4644,14 +4696,8 @@ function writeLine(space, frame, row, text, r, g, b) {
   }
 }
 
-function drawCredits(space, t, frame) {
-  const { cols, rows, n, crawl } = space;
+function drawCreditStars(crawl, cols, t) {
   const { red, green, blue, tall } = crawl;
-  red.fill(0);
-  green.fill(0);
-  blue.fill(0);
-
-  const fade = smooth(0, 1.5, t) * smooth(CREDITS_TIME, CREDITS_TIME - 3, t);
   const stars = Math.floor((cols * tall) / 320);
   for (let k = 0; k < stars; k++) {
     const i = Math.floor(hash(k, 1.3) * cols * tall);
@@ -4660,17 +4706,38 @@ function drawCredits(space, t, frame) {
     green[i] = lit * 0.94;
     blue[i] = lit;
   }
+}
+
+const CREDIT_LOOK = {
+  backdrop: drawCreditStars,
+  after: null,
+  ink: [112, 182, 255],
+  hello: [92, 176, 236],
+  plainInk: [96, 176, 255],
+  plainHello: [70, 190, 220],
+};
+
+function drawCredits(space, t, frame, look = CREDIT_LOOK) {
+  const { cols, rows, n, crawl } = space;
+  const { red, green, blue, tall } = crawl;
+  red.fill(0);
+  green.fill(0);
+  blue.fill(0);
+
+  const fade = smooth(0, 1.5, t) * smooth(CREDITS_TIME, CREDITS_TIME - 3, t);
+  look.backdrop(crawl, cols, t);
 
   const hello = smooth(0.6, 1.6, t) * smooth(5, 4, t);
   const logoAge = t - 5.2;
   if (!crawl.flat) {
-    if (hello > 0) stampText(crawl, cols, crawl.hello, Math.min((cols * 0.8) / crawl.hello.width, (tall * 0.5) / crawl.hello.height), hello, 92, 176, 236);
-    if (t > CRAWL_AT) drawCrawl(crawl, cols, t);
+    if (hello > 0) stampText(crawl, cols, crawl.hello, Math.min((cols * 0.8) / crawl.hello.width, (tall * 0.5) / crawl.hello.height), hello, look.hello[0], look.hello[1], look.hello[2]);
+    if (t > CRAWL_AT) drawCrawl(crawl, cols, t, look.ink);
   }
   if (logoAge > 0 && logoAge < 7) {
     const lit = smooth(0, 0.3, logoAge) * smooth(7, 5.2, logoAge);
-    stampText(crawl, cols, crawl.logo, ((cols * 1.15) / crawl.logo.width) * Math.exp(-logoAge * 0.58), lit, 112, 182, 255);
+    stampText(crawl, cols, crawl.logo, ((cols * 1.15) / crawl.logo.width) * Math.exp(-logoAge * 0.58), lit, look.ink[0], look.ink[1], look.ink[2]);
   }
+  if (look.after) look.after(crawl, cols, t);
 
   for (let i = 0; i < n; i++) {
     const c = i % cols;
@@ -4688,9 +4755,8 @@ function drawCredits(space, t, frame) {
 
   if (crawl.flat) {
     if (hello > 0.02) {
-      const mid = Math.floor(rows / 2);
-      writeLine(space, frame, mid - 1, 'Il y a bien longtemps, dans un terminal lointain,', 70 * hello, 190 * hello, 220 * hello);
-      writeLine(space, frame, mid + 1, 'très lointain....', 70 * hello, 190 * hello, 220 * hello);
+      const top = Math.floor(rows / 2) - crawl.greeting.length;
+      crawl.greeting.forEach((line, k) => writeLine(space, frame, top + k * 2, line, look.plainHello[0] * hello, look.plainHello[1] * hello, look.plainHello[2] * hello));
     }
     if (t > CRAWL_AT) {
       const p = (t - CRAWL_AT) / (CREDITS_TIME - CRAWL_AT);
@@ -4698,7 +4764,7 @@ function drawCredits(space, t, frame) {
       crawl.lines.forEach((line, k) => {
         const row = Math.round(start + k * 2);
         const lit = fade * smooth(0, rows * 0.3, row);
-        writeLine(space, frame, row, line, 96 * lit, 176 * lit, 255 * lit);
+        writeLine(space, frame, row, line, look.plainInk[0] * lit, look.plainInk[1] * lit, look.plainInk[2] * lit);
       });
     }
   }
@@ -4907,13 +4973,86 @@ function leaveStage(stage) {
   ], 5000);
 }
 
-function main() {
+function bakeInBackground() {
+  const report = (progress) => parentPort.postMessage({ progress });
+  const clouds = bakeClouds();
+  report(0.1);
+  const lens = bakeLensing();
+  const swell = bakeWaves();
+  report(0.15);
+  const land = bakeWorld((share) => report(0.15 + share * 0.6));
+  report(0.85);
+  LANDINGS.forEach(bakeAlien);
+  const alien = LANDINGS.map((item) => item.map);
+  const parts = [clouds, lens, swell, land, ...alien];
+  const buffers = parts.flatMap((part) => Object.values(part).filter(ArrayBuffer.isView).map((view) => view.buffer));
+  parentPort.postMessage({ baked: { clouds, lens, swell, land, alien } }, buffers);
+}
+
+function adoptBakes(baked) {
+  clouds = baked.clouds;
+  lensing = baked.lens;
+  waves = baked.swell;
+  world = baked.land;
+  LANDINGS.forEach((item, k) => {
+    item.map = baked.alien[k];
+  });
+}
+
+function startLoading(onProgress, onDone) {
+  let done = false;
+  const finish = (baked) => {
+    if (done) return;
+    done = true;
+    onDone(baked);
+  };
+  try {
+    const worker = new Worker(__filename);
+    worker.on('message', (message) => {
+      if (message.baked) finish(message.baked);
+      else onProgress(message.progress);
+    });
+    worker.on('error', () => finish(null));
+    worker.on('exit', () => finish(null));
+  } catch {
+    setTimeout(() => finish(null), 500);
+  }
+}
+
+function launch({ loadWorld, build, play, skip, look }) {
   const { stdout, stdin } = process;
   if (!stdout.isTTY) {
-    console.error('eye.js doit être lancé dans un terminal.');
+    console.error('Le voyage doit être lancé dans un terminal.');
     process.exit(1);
   }
 
+  const load = { target: 0, value: 0, alpha: 1 };
+  let loaded = false;
+  let finTyped = false;
+  let world, canvas, frame, prev, intro;
+
+  const prepare = () => {
+    world = build(canvas.cols, canvas.rows);
+  };
+  let opening = 0;
+  const jumpToEnd = () => {
+    opening = INTRO_TIME;
+    skip();
+  };
+
+  loadWorld(
+    (progress) => {
+      load.target = progress;
+    },
+    () => {
+      load.target = 1;
+      if (canvas) prepare();
+      loaded = true;
+      if (finTyped) jumpToEnd();
+    },
+  );
+
+  stdout.write(`\x1b[?1049h\x1b[?25l\x1b[48;2;${BG.join(';')}m\x1b[2J`);
   const stage = enterStage();
   let restored = false;
   const restore = () => {
@@ -4927,13 +5066,10 @@ function main() {
     process.exit(0);
   };
 
-  stdout.write(`\x1b[?1049h\x1b[?25l\x1b[48;2;${BG.join(';')}m\x1b[2J`);
   process.on('exit', restore);
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
   process.on('SIGHUP', quit);
-  const show = createShow();
-  let opening = 0;
   let typed = '';
   if (stdin.isTTY) {
     stdin.setRawMode(true);
@@ -4944,53 +5080,70 @@ function main() {
       typed = (typed + key.toLowerCase()).slice(-3);
       if (typed === 'fin') {
         typed = '';
-        opening = INTRO_TIME;
-        skipToEnd(show);
+        if (loaded) jumpToEnd();
+        else finTyped = true;
       }
     });
   }
 
-  let scene, space, frame, prev, intro;
   const rebuild = () => {
-    scene = buildScene(stdout.columns || 80, stdout.rows || 24);
-    space = buildSpace(scene.cols, scene.rows);
-    intro = buildIntro(scene.cols, scene.rows);
-    frame = createFrame(scene.n);
-    prev = new Float64Array(scene.n).fill(-1);
+    canvas = buildCanvas(stdout.columns || 80, stdout.rows || 24);
+    intro = buildIntro(canvas.cols, canvas.rows);
+    if (loaded) prepare();
+    frame = createFrame(canvas.n);
+    prev = new Float64Array(canvas.n).fill(-1);
     stdout.write(`\x1b[48;2;${BG.join(';')}m\x1b[2J`);
   };
 
-  const start = () => {
-    rebuild();
-    let settle;
-    stdout.on('resize', () => {
-      clearTimeout(settle);
-      settle = setTimeout(rebuild, 250);
-    });
+  rebuild();
+  if (stage) opening = -0.6;
+  let settle;
+  stdout.on('resize', () => {
+    clearTimeout(settle);
+    settle = setTimeout(rebuild, 200);
+  });
 
-    let last = process.hrtime.bigint();
-    const tick = () => {
-      const now = process.hrtime.bigint();
-      const dt = Math.min(Number(now - last) / 1e9, 0.1);
-      last = now;
-      if (opening < INTRO_TIME) {
-        opening += dt;
-        drawIntro(intro, space, opening, frame);
-      } else {
-        playShow(show, scene, space, dt, frame);
-      }
-      const flushed = stdout.write(encodeFrame(scene, frame, prev));
-      const spent = Number(process.hrtime.bigint() - now) / 1e6;
-      const next = () => setTimeout(tick, Math.max(0, 1000 / FPS - spent));
-      if (flushed) next();
-      else stdout.once('drain', next);
-    };
-    tick();
+  let last = process.hrtime.bigint();
+  const tick = () => {
+    const now = process.hrtime.bigint();
+    const dt = Math.min(Number(now - last) / 1e9, 0.1);
+    last = now;
+    if (opening < INTRO_TIME) {
+      opening = Math.min(opening + dt, loaded ? INTRO_TIME : TITLE_HOLD);
+      load.value += (load.target - load.value) * (1 - Math.exp(-dt * 6));
+      if (loaded && load.value > 0.98) load.alpha = Math.max(load.alpha - dt * 2.5, 0);
+      drawIntro(intro, canvas, opening, frame, load, look);
+    } else {
+      play(world, dt, frame);
+    }
+    const flushed = stdout.write(encodeFrame(canvas, frame, prev));
+    const spent = Number(process.hrtime.bigint() - now) / 1e6;
+    const next = () => setTimeout(tick, Math.max(0, 1000 / FPS - spent));
+    if (flushed) next();
+    else stdout.once('drain', next);
   };
-
-  setTimeout(start, stage ? 1400 : 0);
+  tick();
 }
 
-if (require.main === module) main();
+function main() {
+  const show = createShow();
+  launch({
+    loadWorld: (onProgress, onDone) => startLoading(onProgress, (baked) => {
+      if (baked) adoptBakes(baked);
+      onDone();
+    }),
+    build: (cols, rows) => ({ scene: buildScene(cols, rows), space: buildSpace(cols, rows) }),
+    play: ({ scene, space }, dt, frame) => playShow(show, scene, space, dt, frame),
+    skip: () => skipToEnd(show),
+  });
+}
 
-module.exports = { ZOOM_AT, ZOOM_TIME, GALAXY_HOLD, JOURNEY, JOURNEY_END, OUTRO_TIME, STAGES, EARTH_AT, GROUND_AT, CLIMB_AT, LANDINGS, INTRO_TIME, CREDITS_TIME, buildScene, buildSpace, buildIntro, drawIntro, skipToEnd, createFrame, createShow, playShow, encodeFrame };
+if (!isMainThread) bakeInBackground();
+else if (require.main === module) main();
+
+module.exports = {
+  FPS, startLoading, adoptBakes, ZOOM_AT, ZOOM_TIME, GALAXY_HOLD, JOURNEY, JOURNEY_END, OUTRO_TIME, STAGES, EARTH_AT, GROUND_AT, CLIMB_AT, LANDINGS, INTRO_TIME, CREDITS_TIME,
+  CELL, TAU, MOODS, RAMP, CRAWL_AT, INTRO_LOOK, CREDIT_LOOK, clamp, mix, smooth, gauss, hash, noise, fbm, tone,
+  buildScene, buildSpace, buildCanvas, buildIntro, drawIntro, skipToEnd, createFrame, createShow, playShow, encodeFrame,
+  launch, resolve, plot, addGlow, fadeFrame, buildCrawl, drawCredits, createEye, updateEye, drawFrame, drawTear, tearSpot, aim, resetView, diveDepth, blink,
+};
